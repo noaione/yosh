@@ -147,6 +147,7 @@ pub static DE: Strings = Strings {
                 ("ziehen", "verschieben"),
                 ("Strg+Mausrad", "am Mauszeiger zoomen (gleiche Stufen wie + / −)"),
                 ("Z", "kleine Seiten vergrößern (aus: Einpassen stoppt bei 100 % nativ)"),
+                ("J", "zu Seite springen"),
                 ("R", "um 90° drehen (im Uhrzeigersinn)"),
                 ("I", "Bildinformationen anzeigen"),
                 ("B", "untere Fortschrittsleiste ein/aus"),

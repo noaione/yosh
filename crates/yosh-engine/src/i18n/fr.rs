@@ -147,6 +147,7 @@ pub static FR: Strings = Strings {
                 ("glisser", "se déplacer"),
                 ("Ctrl+molette", "zoom sous le curseur (mêmes paliers que + / −)"),
                 ("Z", "agrandir les petites pages (non : l’ajustement s’arrête à 100 % natif)"),
+                ("J", "aller à la page"),
                 ("R", "pivoter de 90° (sens horaire)"),
                 ("I", "afficher les infos de l’image"),
                 ("B", "afficher/masquer la barre de progression"),

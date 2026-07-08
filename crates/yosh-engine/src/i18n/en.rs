@@ -143,6 +143,7 @@ pub static EN: Strings = Strings {
                 ("drag", "pan"),
                 ("Ctrl+wheel", "zoom at the cursor (same steps as + / −)"),
                 ("Z", "stretch small pages (off: fit stops at 100% native)"),
+                ("J", "jump to page"),
                 ("R", "rotate 90° (clockwise)"),
                 ("I", "show image info overlay"),
                 ("B", "toggle bottom seekbar"),

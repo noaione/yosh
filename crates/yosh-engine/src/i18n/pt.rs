@@ -147,6 +147,7 @@ pub static PT: Strings = Strings {
                 ("arrastar", "mover"),
                 ("Ctrl+roda", "zoom no cursor (mesmos passos que + / −)"),
                 ("Z", "ampliar páginas pequenas (não: o ajuste para em 100% nativo)"),
+                ("J", "ir para a página"),
                 ("R", "girar 90° (sentido horário)"),
                 ("I", "mostrar informações da imagem"),
                 ("B", "mostrar/ocultar a barra de progresso inferior"),

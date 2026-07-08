@@ -146,6 +146,12 @@ pub struct UiState {
     pub updating: bool,
     pub update_failed: bool,
     pub req_update: bool,
+    /// Manual page jump request, 0-based.
+    pub req_jump_page: Option<usize>,
+    /// Open the manual page-jump dialog.
+    pub jump_open: bool,
+    /// Text buffer for the manual page-jump dialog.
+    pub jump_text: String,
 
     /// Seekbar (bottom progress scrubber). Display fields set by the app each
     /// frame; `seek_request` is the page the user clicked/dragged to, drained
@@ -613,6 +619,19 @@ pub fn chrome(
                     ui.label(&st.status);
                     ui.separator();
                 }
+                if st.reader_open && st.seek_total > 0 {
+                    let mut page = st.seek_index.saturating_add(1).min(st.seek_total);
+                    let resp = ui.add(
+                        egui::DragValue::new(&mut page)
+                            .range(1..=st.seek_total)
+                            .speed(1.0)
+                            .prefix("Page "),
+                    );
+                    if resp.changed() {
+                        st.req_jump_page = Some(page.saturating_sub(1));
+                    }
+                    ui.separator();
+                }
                 match &st.opened {
                     Some(p) => {
                         let short = p
@@ -666,6 +685,7 @@ pub fn chrome(
     }
 
     settings_window(ctx, st);
+    page_jump_window(ctx, st);
 
     if st.info_open && !library_view && !st.info.is_empty() {
         // Sit just under the bar, whatever height it actually is (it was a
@@ -861,6 +881,42 @@ pub fn chrome(
             library_sections(ui, st, lib, libctx);
         });
     }
+}
+
+fn page_jump_window(ctx: &egui::Context, st: &mut UiState) {
+    if !st.jump_open || st.seek_total == 0 {
+        return;
+    }
+    let mut open = true;
+    let mut submit = false;
+    egui::Window::new("Jump to page")
+        .collapsible(false)
+        .resizable(false)
+        .open(&mut open)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Page");
+                let resp = ui.add(
+                    egui::TextEdit::singleline(&mut st.jump_text)
+                        .desired_width(72.0)
+                        .hint_text("1"),
+                );
+                resp.request_focus();
+                ui.label(format!("/ {}", st.seek_total));
+                if ui.button("Go").clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    submit = true;
+                }
+            });
+        });
+
+    if submit {
+        if let Ok(page) = st.jump_text.trim().parse::<usize>() {
+            let page = page.clamp(1, st.seek_total);
+            st.req_jump_page = Some(page - 1);
+            open = false;
+        }
+    }
+    st.jump_open = open;
 }
 
 /// The Settings panel (top-bar ⚙ button): a full mirror of the Android view-options
