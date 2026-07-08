@@ -1141,6 +1141,7 @@ enum Action {
     ToggleSpreadOffset,
     ToggleInfo,
     ToggleSeekbar,
+    TogglePageJump,
     TogglePageTransition,
     ToggleStretch,
     ToggleAnimBar,
@@ -1168,6 +1169,7 @@ fn action_from(ev: &KeyEvent) -> Option<Action> {
             KeyCode::KeyO => return Some(Action::ToggleSpreadOffset),
             KeyCode::KeyC => return Some(Action::ToggleScroll),
             KeyCode::KeyB => return Some(Action::ToggleSeekbar),
+            KeyCode::KeyJ => return Some(Action::TogglePageJump),
             KeyCode::KeyT => return Some(Action::TogglePageTransition),
             KeyCode::KeyZ => return Some(Action::ToggleStretch),
             KeyCode::KeyG => return Some(Action::ToggleAnimBar),
@@ -1359,6 +1361,13 @@ impl State {
                 } else {
                     "Seekbar: off"
                 });
+            }
+            Action::TogglePageJump => {
+                if let Some(src) = &self.reader.source {
+                    self.ui.jump_text =
+                        (self.reader.index.min(src.len().saturating_sub(1)) + 1).to_string();
+                    self.ui.jump_open = true;
+                }
             }
             Action::TogglePageTransition => {
                 self.settings.page_transition_enabled = !self.settings.page_transition_enabled;
@@ -3259,6 +3268,15 @@ impl State {
         // Seekbar jump: re-clamp against the live source, skip a redundant goto
         // (which would needlessly reset pan when landing on the current page).
         if let Some(page) = self.ui.seek_request.take()
+            && let Some(src) = &self.reader.source
+        {
+            let page = page.min(src.len().saturating_sub(1));
+            if page != self.reader.index {
+                self.reader.goto(page);
+                ui_acted = true;
+            }
+        }
+        if let Some(page) = self.ui.req_jump_page.take()
             && let Some(src) = &self.reader.source
         {
             let page = page.min(src.len().saturating_sub(1));
