@@ -13,7 +13,7 @@ use winit::event::{
     ElementState, KeyEvent, MouseButton, MouseScrollDelta, Touch, TouchPhase, WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
-use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey};
+use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
 use fast_image_resize::Resizer;
@@ -217,6 +217,7 @@ struct State {
     mouse_down: bool,
     drag_dist: f32, // accumulated drag distance, to distinguish click from pan
     cursor_in_window: bool, // gates the edge-hover navigation arrows
+    modifiers: ModifiersState,
     last_mid_click: Option<Instant>, // middle-zone double-click → fullscreen
 
     /// The shared touch state machine (finger bookkeeping, lock thresholds,
@@ -886,6 +887,7 @@ impl ApplicationHandler for App {
             mouse_down: false,
             drag_dist: 0.0,
             cursor_in_window: false,
+            modifiers: ModifiersState::empty(),
             last_mid_click: None,
             gestures: TouchGestures::new(),
             win_geom: settings.window.map(|w| (w.x, w.y, w.w, w.h)),
@@ -1001,8 +1003,20 @@ impl ApplicationHandler for App {
             }
             WindowEvent::DroppedFile(path) => state.ui.pending_open = Some(path),
             WindowEvent::RedrawRequested => state.render(),
-            WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
-                if is_escape(&event) && state.close_top_overlay() {
+            // winit synthesizes presses for keys already held when focus returns.
+            // Treating those as shortcuts makes e.g. Flameshot's Ctrl+C fire KeyC
+            // after its overlay closes and focus comes back to yosh.
+            WindowEvent::KeyboardInput {
+                event,
+                is_synthetic: false,
+                ..
+            } if event.state == ElementState::Pressed => {
+                let command_modified = state.modifiers.control_key()
+                    || state.modifiers.alt_key()
+                    || state.modifiers.super_key();
+                if command_modified {
+                    // Ctrl/Alt/Super combinations belong to focused tools and OS chrome.
+                } else if is_escape(&event) && state.close_top_overlay() {
                     // Escape closes focused app chrome before it can quit the app.
                 } else if let Some(action) = action_from(&event) && !response.consumed {
                     if matches!(action, Action::Quit) {
@@ -1057,7 +1071,10 @@ impl ApplicationHandler for App {
             // Ctrl arms the wheel's focal zoom. Not routed through `action_from`: this
             // is modifier *state*, not a keypress, and the wheel needs it on the frame
             // the notch arrives.
-            WindowEvent::ModifiersChanged(m) => state.ctrl_held = m.state().control_key(),
+            WindowEvent::ModifiersChanged(m) => {
+                state.modifiers = m.state();
+                state.ctrl_held = state.modifiers.control_key()
+            },
             WindowEvent::Focused(false) => {
                 state.cursor_in_window = false;
                 // A Ctrl-held alt-tab releases the key while we're unfocused, so the
