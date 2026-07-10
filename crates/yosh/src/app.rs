@@ -1362,6 +1362,7 @@ enum Action {
     TogglePageJump,
     TogglePageTransition,
     ToggleStretch,
+    ToggleSpineShadow,
     ToggleAnimBar,
     PrevVolume,
     NextVolume,
@@ -1390,6 +1391,7 @@ fn action_from(ev: &KeyEvent) -> Option<Action> {
             KeyCode::KeyJ => return Some(Action::TogglePageJump),
             KeyCode::KeyT => return Some(Action::TogglePageTransition),
             KeyCode::KeyZ => return Some(Action::ToggleStretch),
+            KeyCode::KeyV => return Some(Action::ToggleSpineShadow),
             KeyCode::KeyG => return Some(Action::ToggleAnimBar),
             KeyCode::KeyE => return Some(Action::ShowInExplorer),
             KeyCode::KeyR => return Some(Action::Rotate),
@@ -1598,6 +1600,16 @@ impl State {
                 });
             }
             Action::ToggleStretch => self.toggle_stretch(),
+            Action::ToggleSpineShadow => {
+                self.settings.spine_shadow_enabled = !self.settings.spine_shadow_enabled;
+                self.reader.spine_strength = effective_spine(&self.settings);
+                config::save(&self.settings);
+                self.toast(if self.settings.spine_shadow_enabled {
+                    tr().toast_spine_on
+                } else {
+                    tr().toast_spine_off
+                });
+            }
             Action::ToggleAnimBar => self.playback.hidden = !self.playback.hidden,
             Action::ToggleFullscreen => {
                 let fs = match self.window.fullscreen() {
@@ -3527,14 +3539,7 @@ impl State {
         }
         // Panel-only (no key): the reader takes the combined enabled × strength.
         if std::mem::take(&mut self.ui.req_spine_toggle) {
-            self.settings.spine_shadow_enabled = !self.settings.spine_shadow_enabled;
-            self.reader.spine_strength = effective_spine(&self.settings);
-            config::save(&self.settings);
-            self.toast(if self.settings.spine_shadow_enabled {
-                tr().toast_spine_on
-            } else {
-                tr().toast_spine_off
-            });
+            self.apply_action(Action::ToggleSpineShadow);
             ui_acted = true;
         }
         if let Some(v) = self.ui.req_spine_strength.take() {
