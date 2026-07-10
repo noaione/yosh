@@ -32,6 +32,7 @@ pub static RU: Strings = Strings {
     page_turn_animation: "Анимация перелистывания",
     strength: "сила",
     resume_on_startup: "Продолжать при запуске",
+    resume_start_at_first_page: "Продолжать с первой страницы",
     theme: "Тема",
     theme_system: "Системная",
     theme_light: "Светлая",

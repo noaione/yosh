@@ -31,6 +31,7 @@ pub static JA: Strings = Strings {
     page_turn_animation: "ページめくりアニメーション",
     strength: "強さ",
     resume_on_startup: "起動時に続きから開く",
+    resume_start_at_first_page: "最初のページから再開",
     theme: "テーマ",
     theme_system: "システム",
     theme_light: "ライト",

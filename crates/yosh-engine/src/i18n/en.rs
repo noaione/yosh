@@ -27,6 +27,7 @@ pub static EN: Strings = Strings {
     page_turn_animation: "Page-turn animation",
     strength: "strength",
     resume_on_startup: "Resume on startup",
+    resume_start_at_first_page: "Resume at first page",
     theme: "Theme",
     theme_system: "System",
     theme_light: "Light",

@@ -31,6 +31,7 @@ pub static KO: Strings = Strings {
     page_turn_animation: "페이지 넘김 애니메이션",
     strength: "강도",
     resume_on_startup: "시작할 때 이어 읽기",
+    resume_start_at_first_page: "첫 페이지부터 이어 읽기",
     theme: "테마",
     theme_system: "시스템",
     theme_light: "라이트",

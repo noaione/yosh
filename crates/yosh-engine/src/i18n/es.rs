@@ -31,6 +31,7 @@ pub static ES: Strings = Strings {
     page_turn_animation: "Animación al pasar página",
     strength: "intensidad",
     resume_on_startup: "Reanudar al iniciar",
+    resume_start_at_first_page: "Reanudar desde la primera página",
     theme: "Tema",
     theme_system: "Sistema",
     theme_light: "Claro",

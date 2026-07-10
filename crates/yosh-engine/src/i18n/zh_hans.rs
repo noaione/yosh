@@ -31,6 +31,7 @@ pub static ZH_HANS: Strings = Strings {
     page_turn_animation: "翻页动画",
     strength: "强度",
     resume_on_startup: "启动时继续阅读",
+    resume_start_at_first_page: "从第一页继续阅读",
     theme: "主题",
     theme_system: "跟随系统",
     theme_light: "浅色",

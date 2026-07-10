@@ -31,6 +31,7 @@ pub static DE: Strings = Strings {
     page_turn_animation: "Umblätter-Animation",
     strength: "Stärke",
     resume_on_startup: "Beim Start fortsetzen",
+    resume_start_at_first_page: "Bei der ersten Seite fortsetzen",
     theme: "Design",
     theme_system: "System",
     theme_light: "Hell",

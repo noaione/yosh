@@ -31,6 +31,7 @@ pub static ZH_HANT: Strings = Strings {
     page_turn_animation: "翻頁動畫",
     strength: "強度",
     resume_on_startup: "啟動時繼續閱讀",
+    resume_start_at_first_page: "從第一頁繼續閱讀",
     theme: "主題",
     theme_system: "跟隨系統",
     theme_light: "淺色",

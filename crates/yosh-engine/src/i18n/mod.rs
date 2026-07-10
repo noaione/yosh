@@ -215,6 +215,7 @@ pub struct Strings {
     pub page_turn_animation: &'static str,
     pub strength: &'static str,
     pub resume_on_startup: &'static str,
+    pub resume_start_at_first_page: &'static str,
     pub theme: &'static str,
     pub theme_system: &'static str,
     pub theme_light: &'static str,
