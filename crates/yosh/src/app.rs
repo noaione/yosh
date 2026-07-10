@@ -2078,7 +2078,11 @@ impl State {
                 if self.reader.start_index > 0 {
                     self.reader.start_index
                 } else {
-                    resume
+                    if self.settings.resume_start_at_first_page {
+                        0
+                    } else {
+                        resume
+                    }
                 }
             }
         };
@@ -2870,6 +2874,7 @@ impl State {
         self.ui.spine_shadow_strength = self.settings.spine_shadow_strength;
         self.ui.scroll_speed = self.settings.scroll_speed;
         self.ui.resume_on_startup = self.settings.resume_on_startup;
+        self.ui.resume_start_at_first_page = self.settings.resume_start_at_first_page;
         // Current view state for the Settings panel's active-value highlighting.
         self.ui.scroll_on = self.reader.scroll_mode;
         self.ui.dir_rtl = self.reader.direction == Direction::Rtl;
@@ -3267,6 +3272,11 @@ impl State {
         }
         if std::mem::take(&mut self.ui.req_toggle_resume) {
             self.settings.resume_on_startup = !self.settings.resume_on_startup;
+            config::save(&self.settings);
+            ui_acted = true;
+        }
+        if std::mem::take(&mut self.ui.req_toggle_resume_start_at_first_page) {
+            self.settings.resume_start_at_first_page = !self.settings.resume_start_at_first_page;
             config::save(&self.settings);
             ui_acted = true;
         }

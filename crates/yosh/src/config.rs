@@ -101,6 +101,8 @@ pub struct Settings {
     /// Resume the most recent volume on a no-arg launch (default on). Toggled from
     /// the top bar.
     pub resume_on_startup: bool,
+    /// Do not use last page index for resuming; start at first page
+    pub resume_start_at_first_page: bool,
     /// Volume path (folder or archive) → last-read page index.
     pub last_pages: HashMap<String, usize>,
     /// Volume path → read-tracking pair `(furthest_page_count, total_pages)`, where
@@ -159,6 +161,7 @@ impl Default for Settings {
             library_root: None,
             recents: Vec::new(),
             resume_on_startup: true,
+            resume_start_at_first_page: false,
             last_pages: HashMap::new(),
             progress: HashMap::new(),
             collapsed: HashSet::new(),

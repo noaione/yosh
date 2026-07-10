@@ -36,6 +36,8 @@ pub struct UiState {
     /// Whether resume-last-book-on-startup is on. Set each frame; drives the
     /// Settings panel's Resume toggle.
     pub resume_on_startup: bool,
+    /// Whether resume-on-startup should start at the first page, rather than the last.
+    pub resume_start_at_first_page: bool,
     // Current view state, set by the app each frame so the Settings panel can
     // highlight the active value in each control group.
     pub scroll_on: bool,
@@ -75,6 +77,7 @@ pub struct UiState {
     pub req_scroll_speed_save: bool,
     pub req_toggle_resume: bool,
     pub req_toggle_library: bool,
+    pub req_toggle_resume_start_at_first_page: bool,
     /// Whether the Settings panel window is open (toggled by the top-bar gear).
     pub settings_open: bool,
     // Settings-panel requests, drained by the app after the frame.
@@ -1113,6 +1116,22 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
                     st.req_toggle_resume = true;
                 }
             });
+
+            if st.resume_on_startup {
+                ui.label(egui::RichText::new("Resume start at first page").strong());
+                ui.horizontal(|ui| {
+                    if ui.selectable_label(st.resume_start_at_first_page, "On").clicked()
+                        && !st.resume_start_at_first_page
+                    {
+                        st.req_toggle_resume_start_at_first_page = true;
+                    }
+                    if ui.selectable_label(!st.resume_start_at_first_page, "Off").clicked()
+                        && st.resume_start_at_first_page
+                    {
+                        st.req_toggle_resume_start_at_first_page = true;
+                    }
+                });
+            }
 
             ui.label(egui::RichText::new("Theme").strong());
             ui.horizontal(|ui| {
