@@ -260,6 +260,9 @@ struct State {
     /// skip the work when the effective tier hasn't actually moved (re-clicking the
     /// selected option, or a power re-check that found no change).
     applied_tier: DeviceTier,
+    /// Window move/resize happened; snapshot after event batch, when Windows has
+    /// updated maximized state. Immediate resize handling can observe stale state.
+    geometry_dirty: bool,
     volume_key: Option<String>,
     /// Visible page(s) the Tab info overlay text was built for, as
     /// `Reader::visible_pages` reports them (None = rebuild needed).
@@ -893,6 +896,7 @@ impl ApplicationHandler for App {
             on_battery,
             power_checked: Instant::now(),
             applied_tier: tier,
+            geometry_dirty: false,
             settings,
             system_dark,
             volume_key: None,
@@ -987,10 +991,9 @@ impl ApplicationHandler for App {
                 } else {
                     state.unpark();
                 }
+                state.geometry_dirty = true;
             }
-            // Geometry is sampled in `render`, not here — see
-            // `record_window_geometry` for why the event-time state is unreliable.
-            WindowEvent::Moved(_) => {}
+            WindowEvent::Moved(_) => state.geometry_dirty = true,
             // OS switched day/night: refresh the cached flag so a `System` theme
             // follows it (buys_frame below repaints the chrome).
             WindowEvent::ThemeChanged(theme) => {
@@ -999,7 +1002,9 @@ impl ApplicationHandler for App {
             WindowEvent::DroppedFile(path) => state.ui.pending_open = Some(path),
             WindowEvent::RedrawRequested => state.render(),
             WindowEvent::KeyboardInput { event, .. } if event.state == ElementState::Pressed => {
-                if let Some(action) = action_from(&event) && !response.consumed {
+                if is_escape(&event) && state.close_top_overlay() {
+                    // Escape closes focused app chrome before it can quit the app.
+                } else if let Some(action) = action_from(&event) && !response.consumed {
                     if matches!(action, Action::Quit) {
                         // Immediate exit, skipping destructor teardown — see
                         // `CloseRequested` above.
@@ -1097,6 +1102,11 @@ impl ApplicationHandler for App {
         let mut next: Option<Instant> = None;
         // `about_to_wait` also runs before `resumed` has built the window/state.
         if let Some(state) = self.state.as_mut() {
+            // Window state is reliable only after this event batch finishes.
+            if state.geometry_dirty {
+                state.record_window_geometry();
+                state.geometry_dirty = false;
+            }
             let now = Instant::now();
             let mut due = false;
             for deadline in state.deadlines().into_iter().flatten() {
@@ -1252,7 +1262,25 @@ fn page_info(src: &dyn PageSource, index: usize) -> Vec<(String, String)> {
     ]
 }
 
+fn is_escape(ev: &KeyEvent) -> bool {
+    matches!(ev.physical_key, PhysicalKey::Code(KeyCode::Escape))
+        || matches!(&ev.logical_key, Key::Named(NamedKey::Escape))
+}
+
 impl State {
+    fn close_top_overlay(&mut self) -> bool {
+        if self.ui.jump_open {
+            self.ui.jump_open = false;
+        } else if self.ui.settings_open {
+            self.ui.settings_open = false;
+        } else if self.ui.help_open {
+            self.ui.help_open = false;
+        } else {
+            return false;
+        }
+        true
+    }
+
     fn apply_action(&mut self, action: Action) {
         match action {
             Action::Forward => {
@@ -1536,22 +1564,12 @@ impl State {
         }
     }
 
-    /// Snapshot the window's restored (non-maximized, non-fullscreen) geometry and
-    /// whether it is maximized. `win_geom` keeps the last *normal* rect, which is
-    /// what an un-maximize should return to, and what we persist.
-    ///
-    /// **Called once per frame from `render`, never from the event handlers.** On
-    /// Windows a maximize delivers `WM_MOVE` before `WM_SIZE`, and winit only sets
-    /// its `MAXIMIZED` flag while handling `WM_SIZE` — so a `Moved` handler sees
-    /// `is_maximized() == false` alongside the already-maximized rect and records
-    /// the filled-screen rect as the restore target. (That poisoned the saved
-    /// geometry: the window reopened correctly maximized, but un-maximizing landed
-    /// on a near-fullscreen rect, and exiting from fullscreen reopened *windowed*
-    /// at that size.) By render time both messages have been processed, so the
-    /// maximized flag and the rect agree.
+    /// Persist the current position + settings (called on close).
+    /// Snapshot the window's restored (non-maximized, non-fullscreen) geometry.
+    /// Maximizing/fullscreen reports the filled-screen rect, which we don't want
+    /// as the restore target, so those states are skipped — `win_geom` keeps the
+    /// last normal rect, which is exactly what we persist.
     fn record_window_geometry(&mut self) {
-        // Fullscreen reports the filled-screen rect and hides the underlying
-        // maximized state, so leave both snapshots alone and keep what we had.
         if self.window.fullscreen().is_some() {
             return;
         }
@@ -1569,14 +1587,16 @@ impl State {
     }
 
     fn persist(&mut self) {
+        if self.geometry_dirty {
+            self.record_window_geometry();
+            self.geometry_dirty = false;
+        }
         if let Some(k) = &self.volume_key {
             self.settings.last_pages.insert(k.clone(), self.reader.index);
         }
-        // Save geometry + the maximized flag. Both come from the per-frame snapshot:
-        // `win_geom` holds the last *normal* rect (so an un-maximize after restart
-        // returns to the right size/position) and `win_maximized` is the last state
-        // seen outside fullscreen (so quitting from fullscreen still reopens
-        // maximized rather than windowed at the filled-screen size).
+        // Save geometry + the current maximized flag. `win_geom` already holds the
+        // restored rect (it's only updated while normal), so an un-maximize after
+        // restart returns to the right size/position.
         if let Some((x, y, w, h)) = self.win_geom {
             self.settings.window = Some(config::WindowState {
                 x,
