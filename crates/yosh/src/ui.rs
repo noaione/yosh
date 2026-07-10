@@ -696,7 +696,7 @@ pub fn chrome(
                 ui.label("I   show image info overlay");
                 ui.label("B   toggle bottom seekbar");
                 ui.label("T   page-turn transition (slide + fade on flip)");
-                ui.label("spine shadow on two-page spreads — ⚙ Settings (no key)");
+                ui.label("V   spine shadow on two-page spreads");
                 ui.label("G   show/hide the animation panel (animated GIF / WebP)");
                 ui.label("F11   fullscreen      Esc   quit");
                 ui.separator();
