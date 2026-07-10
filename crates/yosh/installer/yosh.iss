@@ -5,6 +5,9 @@
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
+#ifndef AppNumericVersion
+  #define AppNumericVersion "0.0.0.0"
+#endif
 #define AppName "yosh"
 #define AppExe "yosh.exe"
 #define AppPublisher "the-database"
@@ -17,7 +20,7 @@ AppVersion={#AppVersion}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppUrl}
 AppSupportURL={#AppUrl}
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#AppNumericVersion}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes

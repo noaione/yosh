@@ -1,237 +1,173 @@
-name: build-release
+name: build-artifacts
 
 on:
+  workflow_dispatch:
   push:
-    tags: ['v*']        # tag a version -> build + publish a Release
-  workflow_dispatch: {}  # manual run -> build artifacts only (no release)
+    branches:
+      - main
+      - naoX
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.txt'
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            bin: target/release/yosh.exe
-            asset: yosh-windows-x64.exe
-            rustflags: "-C target-feature=+crt-static"
-          - os: ubuntu-latest
-            bin: target/release/yosh
-            asset: yosh-linux-x64
-            rustflags: ""
-    runs-on: ${{ matrix.os }}
+  windows-x64:
+    runs-on: windows-2025
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@4f1f4aec02e41874fa0262ea8ff5172d7978ad1e # v7.0.0
 
-      # The app's reported version comes from Cargo.toml (CARGO_PKG_VERSION); the
-      # release name/installer come from the tag. They must agree — guard against
-      # tagging without bumping (which ships a binary that misreports its version
-      # and re-offers the same self-update forever).
-      - name: Verify tag matches Cargo.toml version
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        run: |
-          cargo_ver=$(grep -m1 '^version' crates/yosh/Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
-          tag_ver="${GITHUB_REF_NAME#v}"
-          echo "Cargo.toml=$cargo_ver  tag=$tag_ver"
-          [ "$cargo_ver" = "$tag_ver" ] || { echo "::error::tag v$tag_ver does not match Cargo.toml version $cargo_ver — bump crates/yosh/Cargo.toml"; exit 1; }
-
-      - name: Install Linux build deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libwayland-dev libx11-dev pkg-config
-
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-
-      # --- AVIF needs dav1d (C). Build it from source + statically link so the
-      # shipped binaries are self-contained; local/default builds stay C-free and
-      # only CI passes --features avif. Built fresh each release (~2 min; not
-      # cached — GitHub caches are ref-scoped, so a tag run can't reuse them).
-      # Recipe mirrors dav1d-rs's own CI, plus static + (Windows) /MT to match
-      # the +crt-static Rust build. ---
-      - name: Set up MSVC env (Windows)
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-      - name: Install nasm
-        uses: ilammy/setup-nasm@v1
-      - uses: actions/setup-python@v5
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
-          python-version: '3.12'
-      - name: Install meson + ninja
-        run: pip install -U meson ninja
+          toolchain: stable
 
-      - name: dav1d env (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          echo "PKG_CONFIG_PATH=$HOME/dav1d_install/lib/x86_64-linux-gnu/pkgconfig" >> "$GITHUB_ENV"
-          echo "SYSTEM_DEPS_DAV1D_LINK=static" >> "$GITHUB_ENV"
-      - name: dav1d env (Windows)
+      - name: Setup rust cache
+        uses: Swatinem/rust-cache@7e35be21c2b94d972b1143087fabc27d7dc881ef # v2.9.1
+
+      - name: Cache vcpkg dependencies
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          echo 'PKG_CONFIG=C:\build\bin\pkg-config.exe' >> "$GITHUB_ENV"
-          echo 'PKG_CONFIG_PATH=C:\build\lib\pkgconfig' >> "$GITHUB_ENV"
-          echo 'C:\build\bin' >> "$GITHUB_PATH"
-          echo 'SYSTEM_DEPS_DAV1D_LINK=static' >> "$GITHUB_ENV"
+        with:
+          path: C:\vcpkg\installed
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
 
-      - name: Build dav1d static (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          git clone --branch 1.5.0 --depth 1 https://code.videolan.org/videolan/dav1d.git
-          cd dav1d
-          meson setup build --prefix="$HOME/dav1d_install" -Ddefault_library=static -Denable_tools=false -Denable_examples=false --buildtype=release
-          ninja -C build install
-      - name: Build pkg-config + dav1d static (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          git clone --branch meson-glib-subproject --depth 1 https://gitlab.freedesktop.org/tpm/pkg-config.git
-          cd pkg-config
-          meson setup build --prefix=C:\build --buildtype=release
-          ninja -C build install
-          cd ..
-          git clone --branch 1.5.0 --depth 1 https://code.videolan.org/videolan/dav1d.git
-          cd dav1d
-          meson setup build --prefix=C:\build -Ddefault_library=static -Denable_tools=false -Denable_examples=false -Db_vscrt=mt --buildtype=release
-          ninja -C build install
-
-      - name: Build
-        run: cargo build --release -p yosh --features avif
-        env:
-          RUSTFLAGS: ${{ matrix.rustflags }}
-
-      - name: Package
-        shell: bash
-        run: cp "${{ matrix.bin }}" "${{ matrix.asset }}"
-
-      - name: Build portable zip (Windows)
-        if: runner.os == 'Windows'
+      - name: Install pkg-config
         shell: pwsh
         run: |
+          choco install pkgconfiglite -y --no-progress
+          pkg-config --version
+
+      - name: Install dav1d with vcpkg
+        shell: pwsh
+        run: |
+          $env:VCPKG_ROOT = $env:VCPKG_INSTALLATION_ROOT
+          "VCPKG_ROOT=$env:VCPKG_ROOT" >> $env:GITHUB_ENV
+          & "$env:VCPKG_ROOT\vcpkg.exe" install dav1d:x64-windows-static-release
+          $pkgConfigPath = "$env:VCPKG_ROOT\installed\x64-windows-static-release\lib\pkgconfig"
+          $env:PKG_CONFIG_PATH = $pkgConfigPath
+          "PKG_CONFIG_PATH=$pkgConfigPath" >> $env:GITHUB_ENV
+          "VCPKG_DEFAULT_TRIPLET=x64-windows-static-release" >> $env:GITHUB_ENV
+          "VCPKGRS_TRIPLET=x64-windows-static-release" >> $env:GITHUB_ENV
+          "SYSTEM_DEPS_DAV1D_LINK=static" >> $env:GITHUB_ENV
+          pkg-config --modversion dav1d
+
+      - name: Build
+        shell: pwsh
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --release -p yosh --features avif
+
+      - name: Package executable and portable zip
+        shell: pwsh
+        run: |
+          Copy-Item target/release/yosh.exe yosh-windows-x64.exe
           New-Item -ItemType Directory -Force portable/yosh | Out-Null
           Copy-Item target/release/yosh.exe portable/yosh/yosh.exe
           Copy-Item crates/yosh/installer/yosh-portable.txt portable/yosh/yosh-portable.txt
           Compress-Archive -Path portable/yosh -DestinationPath yosh-windows-x64-portable.zip -Force
 
-      - name: Build installer (Windows)
-        if: runner.os == 'Windows'
+      - name: Build installer
         shell: pwsh
         run: |
-          $ver = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME -replace '^v','' } else { '0.0.0' }
-          Write-Host "Installer version: $ver"
           choco install innosetup -y --no-progress
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$ver" crates/yosh/installer/yosh.iss
+          $versionLine = Select-String -Path crates/yosh/Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
+          $version = $versionLine.Matches[0].Groups[1].Value
+          if ($version -match '^(\d+)\.(\d+)\.(\d+)-nao\.(\d+)$') {
+            $numericVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$($Matches[4])"
+          } elseif ($version -match '^(\d+)\.(\d+)\.(\d+)$') {
+            $numericVersion = "$($Matches[1]).$($Matches[2]).$($Matches[3]).0"
+          } else {
+            throw "Unsupported Cargo version format: $version"
+          }
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$version" "/DAppNumericVersion=$numericVersion" crates/yosh/installer/yosh.iss
           Copy-Item crates/yosh/installer/Output/yosh-setup-x64.exe yosh-setup-x64.exe
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v6
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
-
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
-        with:
-          files: ${{ matrix.asset }}
-
-      - name: Upload Windows installer artifacts
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v6
-        with:
-          name: yosh-windows-installers
+          name: yosh-windows-x64
           path: |
+            yosh-windows-x64.exe
             yosh-windows-x64-portable.zip
             yosh-setup-x64.exe
 
-      - name: Attach Windows installers to release
-        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
-        with:
-          files: |
-            yosh-windows-x64-portable.zip
-            yosh-setup-x64.exe
-
-  # Android APK. Built on Linux on purpose: UnRAR's C++ only cross-compiles to
-  # Android from a Linux host (a Windows host drags in Windows-only sources), so
-  # this is where RAR/CBR support gets baked into the APK — local Windows builds
-  # keep it off. Gradle-free: build-apk.sh drives cargo-ndk + aapt2/zipalign/
-  # apksigner. Independent of the desktop matrix above.
-  android:
-    runs-on: ubuntu-latest
-    env:
-      # Mapped from repo secrets so steps can both use them and test their presence
-      # via the `env` context (secrets can't be referenced directly in `if:`).
-      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-      KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-      KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+  linux-x64:
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@4f1f4aec02e41874fa0262ea8ff5172d7978ad1e # v7.0.0
 
-      # A release tag must be release-signed — never publish a debug-signed APK.
-      # Fail fast on a tag if the keystore secret is missing. (A manual
-      # workflow_dispatch without the secret still builds a debug-signed artifact,
-      # which is handy for validating the pipeline before the keystore is set up.)
-      - name: Require signing key on release tags
-        if: ${{ startsWith(github.ref, 'refs/tags/v') && env.ANDROID_KEYSTORE_BASE64 == '' }}
+      - name: Install build dependencies
         run: |
-          echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set — cannot release-sign the APK"
-          exit 1
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libwayland-dev libx11-dev pkg-config meson ninja-build nasm
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android,x86_64-linux-android
-      - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-ndk
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-ndk
-
-      # versionName from the tag (e.g. v0.1.41 -> 0.1.41); versionCode packed as
-      # major*10000 + minor*100 + patch (monotonic; assumes minor/patch < 100). The
-      # manifest carries no version, so this is what makes released APKs
-      # update-installable (Android rejects a non-increasing versionCode).
-      - name: Compute version
-        shell: bash
+      - name: Build static dav1d
         run: |
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then vn="${GITHUB_REF_NAME#v}"; else vn="0.0.0"; fi
-          base="${vn%%-*}"
-          IFS=. read -r maj min pat <<< "$base"
-          maj=${maj:-0}; min=${min:-0}; pat=${pat:-0}
-          vc=$(( maj*10000 + min*100 + pat )); [ "$vc" -ge 1 ] || vc=1
-          echo "VERSION_NAME=$vn" >> "$GITHUB_ENV"
-          echo "VERSION_CODE=$vc"  >> "$GITHUB_ENV"
-          echo "APK version $vn (code $vc)"
+          git clone --branch 1.5.0 --depth 1 https://code.videolan.org/videolan/dav1d.git
+          meson setup dav1d/build dav1d --prefix="$HOME/dav1d_install" -Ddefault_library=static -Denable_tools=false -Denable_examples=false --buildtype=release
+          ninja -C dav1d/build install
+          echo "PKG_CONFIG_PATH=$HOME/dav1d_install/lib/x86_64-linux-gnu/pkgconfig" >> "$GITHUB_ENV"
+          echo "SYSTEM_DEPS_DAV1D_LINK=static" >> "$GITHUB_ENV"
 
-      - name: Decode signing keystore
-        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: stable
+
+      - name: Setup rust cache
+        uses: Swatinem/rust-cache@7e35be21c2b94d972b1143087fabc27d7dc881ef # v2.9.1
+
+      - name: Build
+        run: cargo build --release -p yosh --features avif
+
+      - name: Package
+        run: cp target/release/yosh yosh-linux-x64
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: yosh-linux-x64
+          path: yosh-linux-x64
+
+  macos-arm64:
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@4f1f4aec02e41874fa0262ea8ff5172d7978ad1e # v7.0.0
+
+      - name: Install build dependencies
+        run: brew install dav1d pkg-config
+
+      - name: Configure dav1d
         run: |
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-          echo "KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=$(brew --prefix dav1d)/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "SYSTEM_DEPS_DAV1D_LINK=static" >> "$GITHUB_ENV"
 
-      # build-apk.sh reads PROFILE/FEATURES/VERSION_*/KEYSTORE* from env. With no
-      # KEYSTORE it debug-signs; with one it uses the release key. RAR is on (the
-      # script's default FEATURES=rar + -DUNIX_TIME_NS).
-      - name: Build + sign APK
-        run: bash crates/yosh-android/build-apk.sh
-
-      - name: Stage APK asset
-        run: cp crates/yosh-android/out/yosh.apk yosh-android.apk
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v6
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
-          name: yosh-android-apk
-          path: yosh-android.apk
+          toolchain: stable
 
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v3
+      - name: Setup rust cache
+        uses: Swatinem/rust-cache@7e35be21c2b94d972b1143087fabc27d7dc881ef # v2.9.1
+
+      - name: Build
+        run: cargo build --release -p yosh --features avif --target aarch64-apple-darwin
+
+      - name: Package
+        run: cp target/aarch64-apple-darwin/release/yosh yosh-macos-arm64
+
+      - name: Upload macOS ARM artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          files: yosh-android.apk
+          name: yosh-macos-arm64
+          path: yosh-macos-arm64
