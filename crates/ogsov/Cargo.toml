@@ -1,0 +1,16 @@
+[package]
+name = "ogsov"
+version = "0.1.0"
+edition = "2024"
+
+[build-dependencies]
+npyz = "0.9.1"
+zip = { version = "8.6.0", default-features = false, features = ["deflate", "deflate64"] }
+
+[dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "qoi", "tiff", "webp"] }
+
+[[bench]]
+name = "detect"
+harness = false

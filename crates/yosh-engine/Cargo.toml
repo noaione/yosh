@@ -33,6 +33,7 @@ jxl-oxide = { version = "0.12", default-features = false }
 psd = "0.3"
 fast_image_resize = "6"
 qcms = "0.3"
+ogsov = { path = "../ogsov" }
 # ICO container parsing (multi-image .ico → layered pages) and re-encoding.
 ico = "0.5"
 natord = "1"

@@ -13,7 +13,9 @@ use fast_image_resize::Resizer;
 use image::codecs::png::PngEncoder;
 use image::{ExtendedColorType, ImageEncoder};
 
-use crate::decode::{decode_and_downscale, to_rgba_image, DecodedImage, ResizePath};
+use crate::decode::{
+    ColorDetectionOutcome, DecodedImage, ResizePath, decode_and_downscale, to_rgba_image,
+};
 
 /// Cache filename for a volume's thumbnail, derived from its path + mtime + size +
 /// target height. `None` if the volume's metadata can't be read (then we skip the
@@ -43,6 +45,7 @@ fn rgba_image(w: u32, h: u32, pixels: Vec<u8>) -> DecodedImage {
         src_h: h,
         gray: false,
         path: ResizePath::None,
+        color_detection: ColorDetectionOutcome::NotRun,
         pixels,
     }
 }

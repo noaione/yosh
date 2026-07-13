@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::cache::PageCache;
-use crate::decode::MAX_TEX_DIM;
+use crate::decode::{DecodeOptions, MAX_TEX_DIM};
 use crate::layout::{Grid, Layout, WideSet};
 use crate::page::{fit_scale, FitMode, PageTexture, MAX_QUADS};
 use crate::pool::{DecodePool, Msg, Waker};
@@ -657,6 +657,9 @@ pub struct Reader {
     /// The shell's frame-wake callback, remembered so every pool the reader
     /// (re)builds gets it. Set once per window via [`Reader::set_waker`].
     pub waker: Option<Waker>,
+    /// Options copied into each decode-pool worker. Changing them rebuilds the
+    /// pool and invalidates decoded pages.
+    pub decode_options: DecodeOptions,
     /// Pages whose decode errored, mapped to the error message (shown to the user).
     pub failed: HashMap<usize, String>,
 
@@ -833,6 +836,7 @@ impl Reader {
             lq_thumb_h: budget.lq_thumb_h,
             lq_tier: budget.lq_tier,
             waker: None,
+            decode_options: DecodeOptions::default(),
             failed: HashMap::new(),
             index: 0,
             start_index,
@@ -1251,8 +1255,17 @@ impl Reader {
     /// only ever valid as a transient while a re-decode is in flight). `None` before
     /// the anchor is decoded.
     pub fn gpu_sample_scale(&self) -> Option<f32> {
+        let (anchor, _) = self.visible_pages();
+        self.page_gpu_sample_scale(anchor)
+    }
+
+    /// Device-px per decoded texel for one page in the current view.
+    pub fn page_gpu_sample_scale(&self, index: usize) -> Option<f32> {
         if self.scroll_mode {
-            let t = self.cache.get(self.index)?;
+            if index != self.index {
+                return None;
+            }
+            let t = self.cache.get(index)?;
             let sw = self.viewport.w.max(1) as f32;
             // Strip drawn at the page's content width (sw*zoom, native-capped when
             // the no-upscale option is on).
@@ -1290,10 +1303,24 @@ impl Reader {
         Some((t.path.label(), s, pending))
     }
 
+    /// One current-view page's resize pipeline state.
+    pub fn page_resize_state(&self, index: usize) -> Option<(&'static str, f32, bool)> {
+        let t = self.cache.get(index)?;
+        let s = self.page_gpu_sample_scale(index)?;
+        let pending = t.target_h != self.page_target_h(index);
+        Some((t.path.label(), s, pending))
+    }
+
     /// The in-view anchor's full resize pipeline for the info overlay:
     /// `"<CPU resize path>  →  <GPU sampling state>"`. Empty until decoded.
     pub fn resize_path_label(&self) -> String {
-        let Some((cpu, s, pending)) = self.anchor_resize_state() else {
+        let (anchor, _) = self.visible_pages();
+        self.page_resize_path_label(anchor)
+    }
+
+    /// One current-view page's full resize pipeline label.
+    pub fn page_resize_path_label(&self, index: usize) -> String {
+        let Some((cpu, s, pending)) = self.page_resize_state(index) else {
             return String::new();
         };
         let gpu = if (s - 1.0).abs() <= 0.01 {
@@ -1306,6 +1333,19 @@ impl Reader {
             format!("GPU \u{2193}{s:.2}\u{d7} (LQ \u{2014} STUCK)")
         };
         format!("{cpu}  \u{2192}  {gpu}")
+    }
+
+    /// Live color-classifier result for the in-view anchor. Empty until decoded.
+    pub fn color_detection_label(&self) -> String {
+        let (anchor, _) = self.visible_pages();
+        self.page_color_detection_label(anchor)
+    }
+
+    /// One decoded page's color-classifier result.
+    pub fn page_color_detection_label(&self, index: usize) -> String {
+        self.cache
+            .get(index)
+            .map_or_else(String::new, |page| page.color_detection.label())
     }
 
     /// Refresh the live resize readout (`ui.resize_path`) and fire a one-shot debug
@@ -3186,12 +3226,13 @@ impl Reader {
                     .copied()
                     .unwrap_or_else(|| self.index.min(new_len - 1));
                 self.failed.clear();
-                let pool = DecodePool::new(
+                let pool = DecodePool::new_with_options(
                     new.clone(),
                     self.device.clone(),
                     self.queue.clone(),
                     self.tex_pool.clone(),
                     self.workers,
+                    self.decode_options,
                 );
                 // The rebuilt pool starts wakerless — hand it the shell's callback
                 // or landings from here on would never schedule a frame.
@@ -3206,6 +3247,31 @@ impl Reader {
                 self.prefetch();
             }
         }
+    }
+
+    /// Apply decode options to current volume. Existing textures came from old
+    /// policy, so clear them and restart workers before scheduling fresh pages.
+    pub fn set_decode_options(&mut self, options: DecodeOptions) {
+        if self.decode_options == options {
+            return;
+        }
+        self.decode_options = options;
+        self.cache.clear();
+        self.lq_cache.clear();
+        self.failed.clear();
+        self.last_drawn = None;
+        self.last_jobs_key = None;
+        self.pool = self.source.clone().map(|source| {
+            DecodePool::new_with_options(
+                source,
+                self.device.clone(),
+                self.queue.clone(),
+                self.tex_pool.clone(),
+                self.workers,
+                options,
+            )
+        });
+        self.prefetch();
     }
 
     /// Snap zoom to the next ladder stop above/below the current native %. The

@@ -11,8 +11,8 @@
 //!     curve so screentones stay inky (see `tone.rs`). Linear-light resampling is
 //!     what suppresses halftone moiré.
 //!
-//! Color decodes that are *visually* grayscale (within a threshold) are detected
-//! and routed through the grayscale path, matching MangaJaNai's behavior.
+//! Color-stored pages can be left untouched, classified with MangaJaNai's
+//! traditional threshold, or classified by the OGSOV model before resize.
 
 use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -30,6 +30,70 @@ const PNG_SIG: [u8; 4] = [0x89, 0x50, 0x4E, 0x47];
 /// MangaJaNai's default `GrayscaleDetectionThreshold` (its slider spans 0..24).
 /// Higher = more tolerant of slight color casts when deciding "is this gray?".
 const GRAYSCALE_THRESHOLD: i32 = 12;
+
+/// Strategy used to decide whether a color-stored, opaque page should use the
+/// color path or be collapsed to luminance and use the grayscale path.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ColorDetection {
+    /// Skip color detection. Color-stored pages remain RGBA.
+    Off,
+    /// MangaJaNai-compatible channel-difference threshold.
+    #[default]
+    Traditional,
+    /// OGSOV ML ensemble. If this build has no embedded weights, conservatively
+    /// retain color rather than silently falling back to another strategy.
+    Ml,
+}
+
+/// Decode behavior shared by direct callers and decode-pool workers.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct DecodeOptions {
+    pub color_detection: ColorDetection,
+}
+
+/// Color-page classification attached to decoded output for info overlays.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ColorDetectionOutcome {
+    NotRun,
+    SourceGray,
+    Off,
+    Traditional { is_color: bool },
+    Ogsov { is_color: bool, confidence: u8 },
+    OgsovUnavailable,
+    Transparent,
+}
+
+impl ColorDetectionOutcome {
+    fn is_color(self) -> Option<bool> {
+        match self {
+            Self::SourceGray => Some(false),
+            Self::Traditional { is_color } | Self::Ogsov { is_color, .. } => Some(is_color),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> String {
+        match self {
+            Self::NotRun => "not run".to_string(),
+            Self::SourceGray => "source grayscale · is_color: false".to_string(),
+            Self::Off => "off".to_string(),
+            Self::Traditional { is_color } => {
+                format!("traditional · is_color: {is_color}")
+            }
+            Self::Ogsov {
+                is_color,
+                confidence,
+            } => format!("OGSOV · is_color: {is_color} · confidence: {confidence}%"),
+            Self::OgsovUnavailable => "OGSOV unavailable (weights missing)".to_string(),
+            Self::Transparent => "not run (transparent image)".to_string(),
+        }
+    }
+}
+
+/// Whether this binary contains OGSOV weights required by [`ColorDetection::Ml`].
+pub fn ml_color_detection_available() -> bool {
+    ogsov::OGSOV_EMBEDDED
+}
 
 /// GPU `max_texture_dimension_2d`, published by `gpu.rs` at startup. A decoded page
 /// can't exceed this in either dimension (it's one texture), so pages that would
@@ -96,6 +160,8 @@ pub struct DecodedImage {
     pub gray: bool,
     /// Which CPU resize path produced this image (for the info overlay).
     pub path: ResizePath,
+    /// Color classifier outcome, retained through GPU upload for info overlays.
+    pub color_detection: ColorDetectionOutcome,
     pub pixels: Vec<u8>,
 }
 
@@ -282,6 +348,7 @@ pub fn to_rgba_image(img: DecodedImage) -> DecodedImage {
         src_h: img.src_h,
         gray: false,
         path: img.path,
+        color_detection: img.color_detection,
         pixels,
     }
 }
@@ -388,6 +455,45 @@ fn rgba_is_grayscale(rgba: &[u8], threshold: i32) -> bool {
     ratio <= threshold as f64 / 12.0
 }
 
+/// Classify an opaque RGBA page. `true` means it is safe to collapse to one
+/// luminance channel. OGSOV accepts RGB, so alpha is stripped only for ML mode.
+fn detect_color(
+    rgba: &[u8],
+    w: u32,
+    h: u32,
+    gray_by_channels: bool,
+    opaque: bool,
+    mode: ColorDetection,
+) -> ColorDetectionOutcome {
+    if gray_by_channels {
+        return ColorDetectionOutcome::SourceGray;
+    }
+    if !opaque {
+        return ColorDetectionOutcome::Transparent;
+    }
+    match mode {
+        ColorDetection::Off => ColorDetectionOutcome::Off,
+        ColorDetection::Traditional => ColorDetectionOutcome::Traditional {
+            is_color: !rgba_is_grayscale(rgba, GRAYSCALE_THRESHOLD),
+        },
+        ColorDetection::Ml => {
+            // OGSOV feature extraction removes its top 17 pixels. Tiny icons and
+            // malformed zero-sized images cannot be classified by that model.
+            if (w as usize).saturating_mul(h as usize) <= 17 {
+                return ColorDetectionOutcome::OgsovUnavailable;
+            }
+            let Some(model) = ogsov::embedded_model() else {
+                return ColorDetectionOutcome::OgsovUnavailable;
+            };
+            let result = model.detect_rgba(rgba, w as usize, h as usize);
+            ColorDetectionOutcome::Ogsov {
+                is_color: result.is_color,
+                confidence: result.confidence,
+            }
+        }
+    }
+}
+
 /// Collapse RGBA to a single luminance channel (ITU-R 601, matching cv2's
 /// `COLOR_BGR2GRAY`): `Y = 0.299R + 0.587G + 0.114B`.
 fn rgba_to_luma(rgba: &[u8]) -> Vec<u8> {
@@ -432,7 +538,16 @@ fn downscale_gray(
         .chunks_exact(2)
         .map(|c| enc[u16::from_ne_bytes([c[0], c[1]]) as usize])
         .collect();
-    Ok(DecodedImage { w: tw, h: target_h, src_w: w, src_h: h, gray: true, path: ResizePath::GrayLinear, pixels })
+    Ok(DecodedImage {
+        w: tw,
+        h: target_h,
+        src_w: w,
+        src_h: h,
+        gray: true,
+        path: ResizePath::GrayLinear,
+        color_detection: ColorDetectionOutcome::NotRun,
+        pixels,
+    })
 }
 
 /// Color strategy (MangaJaNai `standard_resize`): Lanczos3 in gamma space, no
@@ -454,7 +569,16 @@ fn downscale_color(
             &ResizeOptions::new().resize_alg(ResizeAlg::Convolution(FilterType::Lanczos3)),
         )
         .map_err(|e| format!("resize: {e}"))?;
-    Ok(DecodedImage { w: tw, h: target_h, src_w: w, src_h: h, gray: false, path: ResizePath::Color, pixels: dst.into_vec() })
+    Ok(DecodedImage {
+        w: tw,
+        h: target_h,
+        src_w: w,
+        src_h: h,
+        gray: false,
+        path: ResizePath::Color,
+        color_detection: ColorDetectionOutcome::NotRun,
+        pixels: dst.into_vec(),
+    })
 }
 
 /// LQ grayscale: a fast 8-bit Bilinear downscale in gamma space. Skips the HQ
@@ -479,7 +603,16 @@ fn downscale_gray_fast(
             &ResizeOptions::new().resize_alg(ResizeAlg::Convolution(FilterType::Bilinear)),
         )
         .map_err(|e| format!("resize: {e}"))?;
-    Ok(DecodedImage { w: tw, h: target_h, src_w: w, src_h: h, gray: true, path: ResizePath::GrayLinear, pixels: dst.into_vec() })
+    Ok(DecodedImage {
+        w: tw,
+        h: target_h,
+        src_w: w,
+        src_h: h,
+        gray: true,
+        path: ResizePath::GrayLinear,
+        color_detection: ColorDetectionOutcome::NotRun,
+        pixels: dst.into_vec(),
+    })
 }
 
 /// LQ color: a fast 8-bit Bilinear downscale (vs the HQ Lanczos3).
@@ -500,7 +633,16 @@ fn downscale_color_fast(
             &ResizeOptions::new().resize_alg(ResizeAlg::Convolution(FilterType::Bilinear)),
         )
         .map_err(|e| format!("resize: {e}"))?;
-    Ok(DecodedImage { w: tw, h: target_h, src_w: w, src_h: h, gray: false, path: ResizePath::Color, pixels: dst.into_vec() })
+    Ok(DecodedImage {
+        w: tw,
+        h: target_h,
+        src_w: w,
+        src_h: h,
+        gray: false,
+        path: ResizePath::Color,
+        color_detection: ColorDetectionOutcome::NotRun,
+        pixels: dst.into_vec(),
+    })
 }
 
 /// Decode page bytes (any supported format) and downscale to `target_h` on CPU,
@@ -508,6 +650,16 @@ fn downscale_color_fast(
 pub fn decode_and_downscale(
     bytes: &[u8],
     target_h: u32,
+    resizer: &mut Resizer,
+) -> Result<DecodedImage, String> {
+    decode_and_downscale_with_options(bytes, target_h, DecodeOptions::default(), resizer)
+}
+
+/// Option-aware sibling of [`decode_and_downscale`].
+pub fn decode_and_downscale_with_options(
+    bytes: &[u8],
+    target_h: u32,
+    options: DecodeOptions,
     resizer: &mut Resizer,
 ) -> Result<DecodedImage, String> {
     let (w, h, gray_by_channels, mut full, profile) = decode_raw(bytes)?;
@@ -536,6 +688,14 @@ pub fn decode_and_downscale(
     // A color page may carry transparency; opaque pages (the manga norm) keep the
     // unchanged fast path. Computed once and reused for the routing decisions.
     let opaque = gray_by_channels || is_opaque(&full);
+    let color_detection = detect_color(
+        &full,
+        w,
+        h,
+        gray_by_channels,
+        opaque,
+        options.color_detection,
+    );
 
     // No downscale needed (source already fits the target and the GPU limit):
     // show the decoded pixels unaltered — no resampling, no tone remap.
@@ -543,13 +703,22 @@ pub fn decode_and_downscale(
         if !opaque {
             premultiply_alpha(&mut full);
         }
-        return Ok(DecodedImage { w, h, src_w: w, src_h: h, gray: gray_by_channels, path: ResizePath::None, pixels: full });
+        return Ok(DecodedImage {
+            w,
+            h,
+            src_w: w,
+            src_h: h,
+            gray: gray_by_channels,
+            path: ResizePath::None,
+            color_detection,
+            pixels: full,
+        });
     }
 
-    if gray_by_channels {
+    let mut img = if gray_by_channels {
         // Already single-channel (1ch / GA PNG, L8 JPEG) — no scan needed.
         downscale_gray(&full, w, h, tw, th, resizer)
-    } else if opaque && rgba_is_grayscale(&full, GRAYSCALE_THRESHOLD) {
+    } else if color_detection.is_color() == Some(false) {
         // Color-stored but visually gray (and opaque) → collapse to luma, gray
         // strategy. Transparent images skip this so their alpha is preserved.
         let mut img = downscale_gray(&rgba_to_luma(&full), w, h, tw, th, resizer)?;
@@ -560,7 +729,9 @@ pub fn decode_and_downscale(
             premultiply_alpha(&mut full);
         }
         downscale_color(&full, w, h, tw, th, resizer)
-    }
+    }?;
+    img.color_detection = color_detection;
+    Ok(img)
 }
 
 /// LQ sibling of `decode_and_downscale`: decode + a cheap gamma-space Bilinear
@@ -589,7 +760,7 @@ fn decode_and_downscale_lq(
     let (tw, th) = target_dims(w, h, target_h);
     check_fits(tw, th)?;
     let mut img = if tw == w && th == h {
-        DecodedImage { w, h, src_w: w, src_h: h, gray: gray_by_channels, path: ResizePath::None, pixels: full }
+        DecodedImage { w, h, src_w: w, src_h: h, gray: gray_by_channels, path: ResizePath::None, color_detection: ColorDetectionOutcome::NotRun, pixels: full }
     } else if gray_by_channels {
         downscale_gray_fast(&full, w, h, tw, th, resizer)?
     } else {
@@ -629,7 +800,16 @@ fn downscale_rgba_frame(
     let (tw, th) = target_dims(w, h, target_h);
     check_fits(tw, th)?;
     if tw == w && th == h {
-        return Ok(DecodedImage { w, h, src_w: w, src_h: h, gray: false, path: ResizePath::None, pixels: rgba });
+        return Ok(DecodedImage {
+            w,
+            h,
+            src_w: w,
+            src_h: h,
+            gray: false,
+            path: ResizePath::None,
+            color_detection: ColorDetectionOutcome::NotRun,
+            pixels: rgba,
+        });
     }
     downscale_color(&rgba, w, h, tw, th, resizer)
 }
@@ -681,7 +861,16 @@ fn decode_ico(bytes: &[u8]) -> Result<Vec<DecodedImage>, String> {
         if !is_opaque(&pixels) {
             premultiply_alpha(&mut pixels);
         }
-        out.push(DecodedImage { w, h, src_w: w, src_h: h, gray: false, path: ResizePath::None, pixels });
+        out.push(DecodedImage {
+            w,
+            h,
+            src_w: w,
+            src_h: h,
+            gray: false,
+            path: ResizePath::None,
+            color_detection: ColorDetectionOutcome::NotRun,
+            pixels,
+        });
     }
     if out.is_empty() {
         return Err("ico: no entries".into());
@@ -698,6 +887,17 @@ pub fn decode_page(
     bytes: &[u8],
     target_h: u32,
     lq: bool,
+    resizer: &mut Resizer,
+) -> Result<DecodedPage, String> {
+    decode_page_with_options(bytes, target_h, lq, DecodeOptions::default(), resizer)
+}
+
+/// Option-aware sibling of [`decode_page`].
+pub fn decode_page_with_options(
+    bytes: &[u8],
+    target_h: u32,
+    lq: bool,
+    options: DecodeOptions,
     resizer: &mut Resizer,
 ) -> Result<DecodedPage, String> {
     // ICO: expose every contained image as a steppable layer (1 entry → still).
@@ -736,7 +936,7 @@ pub fn decode_page(
     let img = if lq {
         decode_and_downscale_lq(bytes, target_h, resizer)?
     } else {
-        decode_and_downscale(bytes, target_h, resizer)?
+        decode_and_downscale_with_options(bytes, target_h, options, resizer)?
     };
     Ok(DecodedPage::Still(img))
 }
@@ -763,81 +963,136 @@ mod tests {
         Frame::from_parts(img, 0, 0, Delay::from_numer_denom_ms(100, 1))
     }
 
-    /// Encode a solid-color 4-component JPEG. `ink` is **ink-coverage** CMYK
-    /// (0 = no ink), the convention `jpeg-encoder` takes and `jpeg-decoder` hands
-    /// back — the encoder applies the Adobe inversion itself. `color_type` selects
-    /// which Adobe APP14 transform is written: `Cmyk` → 0, `CmykAsYcck` → 2.
-    fn encode_cmyk_jpeg(ink: [u8; 4], color_type: jpeg_encoder::ColorType) -> Vec<u8> {
-        let (w, h) = (32u16, 32u16);
-        let data: Vec<u8> = ink.iter().copied().cycle().take(w as usize * h as usize * 4).collect();
-        let mut buf = Vec::new();
-        jpeg_encoder::Encoder::new(&mut buf, 98)
-            .encode(&data, w, h, color_type)
-            .unwrap();
-        buf
-    }
-
-    fn assert_solid_rgb(img: &DecodedImage, want: [u8; 3], what: &str) {
-        assert!(!img.gray, "{what}: a CMYK page must decode as RGBA8");
-        assert_eq!(img.pixels.len(), (img.w * img.h * 4) as usize, "{what}: RGBA8 length");
-        // Sample the middle so JPEG block edges don't skew it.
-        let i = (((img.h / 2) * img.w + img.w / 2) * 4) as usize;
-        let got = [img.pixels[i], img.pixels[i + 1], img.pixels[i + 2]];
-        let ok = got.iter().zip(&want).all(|(g, w)| (*g as i32 - *w as i32).abs() <= 24);
-        assert!(ok, "{what}: expected ~{want:?}, got {got:?}");
-        assert_eq!(img.pixels[i + 3], 255, "{what}: opaque");
-    }
-
-    /// Issue #14: a CMYK JPEG used to fail outright with
-    /// "jpeg: unsupported pixel format CMYK32". Both Adobe transforms must decode —
-    /// plain CMYK (APP14 transform 0) and YCCK (transform 2), which is what
-    /// Photoshop and ImageMagick actually emit.
-    #[test]
-    fn cmyk_and_ycck_jpegs_decode() {
-        // Pure cyan ink → red channel fully absorbed, green/blue pass through.
-        let cases = [
-            (jpeg_encoder::ColorType::Cmyk, "CMYK (APP14 transform 0)"),
-            (jpeg_encoder::ColorType::CmykAsYcck, "YCCK (APP14 transform 2)"),
-        ];
-        for (ct, what) in cases {
-            let bytes = encode_cmyk_jpeg([255, 0, 0, 0], ct);
-            let mut resizer = Resizer::new();
-            match decode_page(&bytes, 32, false, &mut resizer).unwrap() {
-                DecodedPage::Still(img) => assert_solid_rgb(&img, [0, 255, 255], what),
-                _ => panic!("{what}: a jpeg is a still"),
-            }
+    fn encode_rgb_png(w: u32, h: u32, rgb: [u8; 3]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut enc = png::Encoder::new(&mut bytes, w, h);
+            enc.set_color(png::ColorType::Rgb);
+            enc.set_depth(png::BitDepth::Eight);
+            let mut writer = enc.write_header().unwrap();
+            writer
+                .write_image_data(&rgb.repeat((w * h) as usize))
+                .unwrap();
         }
+        bytes
     }
 
-    /// The K channel must darken rather than invert — a sign error here would show
-    /// as a near-white page instead of a near-black one.
     #[test]
-    fn cmyk_black_ink_decodes_dark() {
-        let bytes = encode_cmyk_jpeg([0, 0, 0, 255], jpeg_encoder::ColorType::Cmyk);
+    fn color_detection_off_preserves_color_storage() {
+        let bytes = encode_rgb_png(32, 32, [120, 121, 120]);
         let mut resizer = Resizer::new();
-        match decode_page(&bytes, 32, false, &mut resizer).unwrap() {
-            DecodedPage::Still(img) => assert_solid_rgb(&img, [0, 0, 0], "full K ink"),
-            _ => panic!("a jpeg is a still"),
-        }
+        let img = decode_and_downscale_with_options(
+            &bytes,
+            16,
+            DecodeOptions {
+                color_detection: ColorDetection::Off,
+            },
+            &mut resizer,
+        )
+        .unwrap();
+        assert!(!img.gray);
+        assert_eq!(img.path, ResizePath::Color);
+        assert_eq!(img.color_detection, ColorDetectionOutcome::Off);
     }
 
-    /// A CMYK ICC profile must be recognized so `decode_and_downscale` skips color
-    /// management. It cannot be applied to the already-RGB pixels, and qcms does
-    /// *not* reject the mismatch — it silently maps white to blue.
     #[test]
-    fn cmyk_icc_profile_is_detected() {
-        let mut prof = vec![0u8; 132];
-        prof[16..20].copy_from_slice(b"CMYK");
-        assert!(icc::is_cmyk(&prof));
-        assert!(!icc::is_gray(&prof));
+    fn traditional_detection_keeps_current_gray_from_color_path() {
+        let bytes = encode_rgb_png(32, 32, [120, 121, 120]);
+        let mut resizer = Resizer::new();
+        let img = decode_and_downscale_with_options(
+            &bytes,
+            16,
+            DecodeOptions {
+                color_detection: ColorDetection::Traditional,
+            },
+            &mut resizer,
+        )
+        .unwrap();
+        assert!(img.gray);
+        assert_eq!(img.path, ResizePath::GrayFromColor);
+        assert_eq!(
+            img.color_detection,
+            ColorDetectionOutcome::Traditional { is_color: false }
+        );
+    }
 
-        let mut gray = vec![0u8; 132];
-        gray[16..20].copy_from_slice(b"GRAY");
-        assert!(!icc::is_cmyk(&gray), "GRAY must not read as CMYK");
+    #[test]
+    fn ml_detection_is_conservative_without_weights() {
+        if ml_color_detection_available() {
+            return;
+        }
+        let bytes = encode_rgb_png(32, 32, [120, 120, 120]);
+        let mut resizer = Resizer::new();
+        let img = decode_and_downscale_with_options(
+            &bytes,
+            16,
+            DecodeOptions {
+                color_detection: ColorDetection::Ml,
+            },
+            &mut resizer,
+        )
+        .unwrap();
+        assert!(!img.gray);
+        assert_eq!(img.path, ResizePath::Color);
+        assert_eq!(img.color_detection, ColorDetectionOutcome::OgsovUnavailable);
+    }
 
-        let mut rgb = vec![0u8; 132];
-        rgb[16..20].copy_from_slice(b"RGB ");
-        assert!(!icc::is_cmyk(&rgb), "RGB must not read as CMYK");
+    #[test]
+    fn ml_detection_routes_exact_rgb_gray_when_model_available() {
+        if !ml_color_detection_available() {
+            return;
+        }
+        let bytes = encode_rgb_png(32, 32, [120, 120, 120]);
+        let mut resizer = Resizer::new();
+        let img = decode_and_downscale_with_options(
+            &bytes,
+            16,
+            DecodeOptions {
+                color_detection: ColorDetection::Ml,
+            },
+            &mut resizer,
+        )
+        .unwrap();
+        assert!(img.gray);
+        assert_eq!(img.path, ResizePath::GrayFromColor);
+        assert_eq!(
+            img.color_detection,
+            ColorDetectionOutcome::Ogsov {
+                is_color: false,
+                confidence: 100,
+            }
+        );
+        assert_eq!(
+            img.color_detection.label(),
+            "OGSOV · is_color: false · confidence: 100%"
+        );
+    }
+
+    #[test]
+    fn ml_detection_is_reported_at_native_size() {
+        if !ml_color_detection_available() {
+            return;
+        }
+        let bytes = encode_rgb_png(32, 32, [120, 120, 120]);
+        let mut resizer = Resizer::new();
+        let img = decode_and_downscale_with_options(
+            &bytes,
+            32,
+            DecodeOptions {
+                color_detection: ColorDetection::Ml,
+            },
+            &mut resizer,
+        )
+        .unwrap();
+        assert!(!img.gray, "native-size pixels remain as-is");
+        assert_eq!(img.path, ResizePath::None);
+        assert_eq!(
+            img.color_detection,
+            ColorDetectionOutcome::Ogsov {
+                is_color: false,
+                confidence: 100,
+            }
+        );
     }
 
     /// The IDCT-scale chooser must never pick a reduction that lands *below* the

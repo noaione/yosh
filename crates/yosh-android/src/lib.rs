@@ -21,13 +21,13 @@ use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::time::{Duration, Instant};
 
-use jni::objects::{JObject, JString, JValue};
 use jni::JavaVM;
+use jni::objects::{JObject, JString, JValue};
 use winit::application::ApplicationHandler;
 use winit::event::{Touch, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::platform::android::activity::AndroidApp;
 use winit::platform::android::EventLoopBuilderExtAndroid;
+use winit::platform::android::activity::AndroidApp;
 use winit::window::{Window, WindowId};
 
 use yosh_engine::gesture::{GestureCtx, GestureEvent, Phase, TouchGestures};
@@ -36,7 +36,7 @@ use yosh_engine::layout::Layout;
 use yosh_engine::page::{FitMode, PagePipeline};
 use yosh_engine::pool::{DecodePool, Waker};
 use yosh_engine::reader::{Budget, DeviceTier, Direction, Reader, Viewport};
-use yosh_engine::source::{is_image_ext, FolderSource, PageSource, SevenzSource, ZipSource};
+use yosh_engine::source::{FolderSource, PageSource, SevenzSource, ZipSource, is_image_ext};
 // RAR/CBR is gated behind the off-by-default `rar` feature (Linux/CI builds only —
 // see Cargo.toml). The engine only exposes `RarSource` when its `rar` feature is on.
 #[cfg(feature = "rar")]
@@ -70,13 +70,22 @@ fn android_main(app: AndroidApp) {
     let positions = pos_path.as_deref().map(load_positions).unwrap_or_default();
     // Reading progress (furthest page seen + total) → the library's read states.
     let progress_path = app.internal_data_path().map(|p| p.join("progress.tsv"));
-    let progress = progress_path.as_deref().map(load_progress).unwrap_or_default();
+    let progress = progress_path
+        .as_deref()
+        .map(load_progress)
+        .unwrap_or_default();
     // Series the user collapsed in the library (default expanded).
     let collapsed_path = app.internal_data_path().map(|p| p.join("collapsed.txt"));
-    let collapsed = collapsed_path.as_deref().map(load_collapsed).unwrap_or_default();
+    let collapsed = collapsed_path
+        .as_deref()
+        .map(load_collapsed)
+        .unwrap_or_default();
     // Most-recently-read volume keys (MRU, newest first): resume target + shelf.
     let recents_path = app.internal_data_path().map(|p| p.join("recents.txt"));
-    let recents = recents_path.as_deref().map(load_recents).unwrap_or_default();
+    let recents = recents_path
+        .as_deref()
+        .map(load_recents)
+        .unwrap_or_default();
     let lib_dir_file = app.internal_data_path().map(|p| p.join("libroot.txt"));
     let init_lib_dir = lib_dir_file
         .as_deref()
@@ -86,22 +95,20 @@ fn android_main(app: AndroidApp) {
         .unwrap_or_else(|| PathBuf::from("/storage/emulated/0"));
     // Persisted viewing options (direction / layout / fit); default RTL manga order.
     let view_file = app.internal_data_path().map(|p| p.join("view.txt"));
-    let init_view = view_file
-        .as_deref()
-        .map(load_view)
-        .unwrap_or((
-            Direction::Rtl,
-            LayoutMode::Single,
-            FitMode::Window,
-            true,
-            false,
-            true,
-            ThemePref::System,
-            PerfPref::Auto,
-            false,
-            DEFAULT_SPINE_STRENGTH,
-            false,
-        ));
+    let init_view = view_file.as_deref().map(load_view).unwrap_or((
+        Direction::Rtl,
+        LayoutMode::Single,
+        FitMode::Window,
+        true,
+        false,
+        true,
+        ThemePref::System,
+        PerfPref::Auto,
+        false,
+        DEFAULT_SPINE_STRENGTH,
+        false,
+        ColorDetectionPref::Traditional,
+    ));
     let event_loop = EventLoop::builder()
         .with_android_app(app.clone())
         .build()
@@ -462,6 +469,8 @@ struct App {
     /// a budget at runtime without re-reading `/proc`.
     mem_budget_mb: u64,
     cpus: usize,
+    /// Color-stored page classification before HQ downscale.
+    color_detection: ColorDetectionPref,
     /// Cached OS night-mode flag (re-read on resume); resolves `ThemePref::System`.
     system_dark: bool,
     /// Light/dark actually pushed into the egui context (`ctx.set_visuals` is
@@ -504,9 +513,7 @@ fn vol_state(
 ) -> VolState {
     match progress.get(key) {
         Some(&(furthest, total)) if total > 0 && furthest >= total => VolState::Finished,
-        Some(&(furthest, total)) => {
-            VolState::InProgress(furthest as f32 / total.max(1) as f32)
-        }
+        Some(&(furthest, total)) => VolState::InProgress(furthest as f32 / total.max(1) as f32),
         None if positions.contains_key(key) => VolState::InProgress(0.0),
         None => VolState::Unread,
     }
@@ -535,7 +542,11 @@ const SERIES_MAX_DEPTH: usize = 5;
 /// Walk `root` off-thread and group its comics into [`Series`] — every folder
 /// that directly holds at least one volume. Sent back whole (drained in render
 /// like the cover decodes), so a deep tree or slow storage never hitches the UI.
-fn spawn_library_scan(root: PathBuf, tx: std::sync::mpsc::Sender<Vec<Series>>, waker: Option<Waker>) {
+fn spawn_library_scan(
+    root: PathBuf,
+    tx: std::sync::mpsc::Sender<Vec<Series>>,
+    waker: Option<Waker>,
+) {
     std::thread::spawn(move || {
         let mut out = Vec::new();
         if walk_series(&root, 0, &mut out) {
@@ -566,7 +577,9 @@ fn spawn_library_scan(root: PathBuf, tx: std::sync::mpsc::Sender<Vec<Series>>, w
 /// (returns true; the caller adds it and does not descend), archives become
 /// volumes, and remaining sub-folders recurse as potential series.
 fn walk_series(dir: &Path, depth: usize, out: &mut Vec<Series>) -> bool {
-    let Ok(rd) = std::fs::read_dir(dir) else { return false };
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return false;
+    };
     let mut volumes: Vec<PathBuf> = Vec::new();
     let mut subdirs: Vec<PathBuf> = Vec::new();
     for e in rd.flatten() {
@@ -585,7 +598,9 @@ fn walk_series(dir: &Path, depth: usize, out: &mut Vec<Series>) -> bool {
         }
     }
     if !volumes.is_empty() {
-        volumes.sort_by(|a, b| natord::compare(&name_of(a).to_lowercase(), &name_of(b).to_lowercase()));
+        volumes.sort_by(|a, b| {
+            natord::compare(&name_of(a).to_lowercase(), &name_of(b).to_lowercase())
+        });
         out.push(Series {
             name: name_of(dir),
             dir: dir.to_path_buf(),
@@ -748,6 +763,52 @@ impl PerfPref {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ColorDetectionPref {
+    Off,
+    Traditional,
+    Ml,
+}
+
+impl ColorDetectionPref {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Traditional => "traditional",
+            Self::Ml => "ml",
+        }
+    }
+
+    fn parse(tok: Option<&&str>) -> Self {
+        match tok {
+            Some(&"off") => Self::Off,
+            Some(&"ml") => Self::Ml,
+            _ => Self::Traditional,
+        }
+    }
+
+    fn decode_options(self) -> yosh_engine::decode::DecodeOptions {
+        use yosh_engine::decode::{ColorDetection, DecodeOptions};
+        DecodeOptions {
+            color_detection: match self {
+                Self::Off => ColorDetection::Off,
+                Self::Traditional => ColorDetection::Traditional,
+                Self::Ml => ColorDetection::Ml,
+            },
+        }
+    }
+
+    /// Low-tier devices skip ML's extra CPU work but retain the user's ML choice
+    /// for when a higher tier becomes active.
+    fn decode_options_for_tier(self, tier: DeviceTier) -> yosh_engine::decode::DecodeOptions {
+        if self == Self::Ml && tier == DeviceTier::Low {
+            Self::Traditional.decode_options()
+        } else {
+            self.decode_options()
+        }
+    }
+}
+
 /// Cross-shell actions an egui frame requests (handled after the egui run, since
 /// they need `Shell` state the reader/render path doesn't own).
 #[derive(Default)]
@@ -841,7 +902,9 @@ impl ApplicationHandler for Shell {
 
         // First launch (or a forced rebuild): full build.
         let instance = GpuContext::create_instance();
-        let surface = instance.create_surface(window.clone()).expect("create surface");
+        let surface = instance
+            .create_surface(window.clone())
+            .expect("create surface");
         // A phone has exactly one GPU, so the preference picks no different
         // adapter — but `LowPower` is the honest hint to the driver's power
         // governor for a workload that draws a couple of quads per frame.
@@ -878,7 +941,11 @@ impl ApplicationHandler for Shell {
         if let Some(cjk) = cjk_font() {
             fonts.font_data.insert("cjk".to_owned(), cjk);
             for fam in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-                fonts.families.entry(fam).or_default().push("cjk".to_owned());
+                fonts
+                    .families
+                    .entry(fam)
+                    .or_default()
+                    .push("cjk".to_owned());
             }
         }
         egui_ctx.set_fonts(fonts);
@@ -895,7 +962,9 @@ impl ApplicationHandler for Shell {
             config.format,
             egui_wgpu::RendererOptions::default(),
         );
-        let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+        let cpus = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
         let (mem_budget_mb, total_mb) = device_mem();
         let max_khz = max_cpu_khz();
         let auto_tier = device_tier(total_mb, max_khz);
@@ -930,10 +999,15 @@ impl ApplicationHandler for Shell {
         // No-upscale fit (persisted; default off = stretch small pages, as before).
         reader.fit_no_upscale = self.init_view.10;
         // Spine shadow: the shell owns on/off × strength, the reader takes one number.
-        reader.spine_strength = if self.init_view.8 { self.init_view.9 } else { 0.0 };
+        reader.spine_strength = if self.init_view.8 {
+            self.init_view.9
+        } else {
+            0.0
+        };
         // Landing decodes schedule their own frame from the worker thread; every
         // pool this reader builds inherits the callback.
         reader.set_waker(self.frame_waker.clone());
+        reader.decode_options = self.init_view.11.decode_options_for_tier(tier);
         let (thumb_tx, thumb_rx) = std::sync::mpsc::channel();
         let (series_tx, series_rx) = std::sync::mpsc::channel();
         let (info_tx, info_rx) = std::sync::mpsc::channel();
@@ -941,7 +1015,10 @@ impl ApplicationHandler for Shell {
         // On-disk cover-thumbnail cache dir (app-private `…/thumbs`): covers load
         // from here instead of re-decoding the full first page on every open. It's
         // owned by the cover worker, the only thing that touches it.
-        let thumb_cache_dir = self.android_app.internal_data_path().map(|p| p.join("thumbs"));
+        let thumb_cache_dir = self
+            .android_app
+            .internal_data_path()
+            .map(|p| p.join("thumbs"));
         let cover_tx = spawn_cover_worker(thumb_cache_dir, thumb_tx, self.frame_waker.clone());
         self.app = Some(App {
             window: window.clone(),
@@ -996,6 +1073,7 @@ impl ApplicationHandler for Shell {
             auto_tier,
             mem_budget_mb,
             cpus,
+            color_detection: self.init_view.11,
             system_dark: system_dark(&self.android_app),
             applied_light: None,
         });
@@ -1117,7 +1195,11 @@ impl ApplicationHandler for Shell {
         }
         log::warn!(
             "memory warning: shed {shed_lq} LQ previews + the texture pool{}",
-            if dropped_park { " + the parked source" } else { "" },
+            if dropped_park {
+                " + the parked source"
+            } else {
+                ""
+            },
         );
     }
 
@@ -1305,8 +1387,9 @@ impl Shell {
             TouchPhase::Ended => Phase::End,
             TouchPhase::Cancelled => Phase::Cancel,
         };
-        let resp =
-            self.gestures.on_touch(&mut app.reader, &ctx, phase, id, x, y, Instant::now());
+        let resp = self
+            .gestures
+            .on_touch(&mut app.reader, &ctx, phase, id, x, y, Instant::now());
         // Load-bearing: this loop buys no frame per event, so a gesture that moved
         // the reader has to ask for one explicitly. Done inside the `app` borrow,
         // before the events (whose handlers need all of `self`).
@@ -1533,7 +1616,11 @@ impl Shell {
             .unwrap_or(false);
         // In scroll mode there are no discrete pages to flip, so the side edges fall
         // through to the center action (toggle the reading chrome).
-        let scroll_mode = self.app.as_ref().map(|a| a.reader.scroll_mode).unwrap_or(false);
+        let scroll_mode = self
+            .app
+            .as_ref()
+            .map(|a| a.reader.scroll_mode)
+            .unwrap_or(false);
         if !scroll_mode && x < w * EDGE_ZONE as f64 {
             // Left edge: next in RTL, previous in LTR.
             self.flip(if rtl { 1 } else { -1 });
@@ -1566,7 +1653,11 @@ impl Shell {
         // Base "current" on the pending target while an open is in flight, so a
         // second next-book tap advances from the not-yet-loaded neighbour instead
         // of asking for it again.
-        let Some(cur) = self.opening_key.clone().or_else(|| self.current_key.clone()) else {
+        let Some(cur) = self
+            .opening_key
+            .clone()
+            .or_else(|| self.current_key.clone())
+        else {
             return SibLookup::Missing;
         };
         let cur_path = PathBuf::from(&cur);
@@ -1844,7 +1935,9 @@ impl Shell {
     /// thread: they are small, now rare, and `suspended()` must have them on disk
     /// before it returns.
     fn flush_saves(&mut self, force: bool) {
-        let Some(since) = self.dirty_since else { return };
+        let Some(since) = self.dirty_since else {
+            return;
+        };
         if !force && since.elapsed() < SAVE_DEBOUNCE {
             return;
         }
@@ -1899,6 +1992,7 @@ impl Shell {
                 app.spine_shadow_on,
                 app.spine_shadow_strength,
                 app.reader.fit_no_upscale,
+                app.color_detection,
             );
         }
         if std::mem::take(&mut self.dirty_libroot)
@@ -1932,7 +2026,9 @@ impl Shell {
         let (Some(key), Some(app)) = (self.current_key.as_deref(), self.app.as_ref()) else {
             return;
         };
-        let Some(src) = &app.reader.source else { return };
+        let Some(src) = &app.reader.source else {
+            return;
+        };
         let len = src.len();
         if len == 0 {
             return;
@@ -1999,18 +2095,22 @@ fn attach_source(
     src: Arc<dyn PageSource>,
     start: usize,
 ) {
-    let pool = DecodePool::new(
+    let pool = DecodePool::new_with_options(
         src.clone(),
         device.clone(),
         queue.clone(),
         reader.tex_pool.clone(),
         reader.workers,
+        reader.decode_options,
     );
     // A new pool starts wakerless: re-install the shell's callback or this book's
     // decodes would land without ever scheduling the frame that draws them.
     pool.set_waker(reader.waker.clone());
     reader.pool = Some(pool);
     reader.reset_volume_state();
+    reader.cache.clear();
+    reader.lq_cache.clear();
+    reader.failed.clear();
     reader.rotation = 0; // each comic opens upright (mirrors the desktop shell)
     reader.index = start;
     reader.source = Some(src);
@@ -2024,7 +2124,7 @@ fn attach_source(
 /// The persisted viewing options, in `view.txt`'s positional order: direction,
 /// layout mode, fit, page-turn animation, scroll mode, resume-on-startup, chrome
 /// theme, performance profile, spine shadow on/off, spine-shadow strength,
-/// no-upscale fit.
+/// no-upscale fit, color-page detection.
 type InitView = (
     Direction,
     LayoutMode,
@@ -2037,6 +2137,7 @@ type InitView = (
     bool,
     f32,
     bool,
+    ColorDetectionPref,
 );
 
 /// Load the persisted per-comic positions (one `index\tkey` line each).
@@ -2052,9 +2153,11 @@ fn load_view(path: &Path) -> InitView {
         true,
         ThemePref::System,
         PerfPref::Auto,
+        ColorDetectionPref::Traditional,
     );
     let (mut spine, mut spine_strength) = (false, DEFAULT_SPINE_STRENGTH);
     let mut no_upscale = false;
+    let mut color = ColorDetectionPref::Traditional;
     if let Ok(s) = std::fs::read_to_string(path) {
         let t: Vec<&str> = s.trim().split(',').collect();
         if t.first() == Some(&"ltr") {
@@ -2092,12 +2195,27 @@ fn load_view(path: &Path) -> InitView {
             .unwrap_or(DEFAULT_SPINE_STRENGTH);
         // 11th slot: no-upscale fit; absent (older files) ⇒ off (stretch to fit).
         no_upscale = t.get(10) == Some(&"noupscale");
+        // 12th slot: color-page detection; absent keeps historical behavior.
+        color = ColorDetectionPref::parse(t.get(11));
     }
-    (dir, lay, fit, anim, scroll, resume, theme, perf, spine, spine_strength, no_upscale)
+    (
+        dir,
+        lay,
+        fit,
+        anim,
+        scroll,
+        resume,
+        theme,
+        perf,
+        spine,
+        spine_strength,
+        no_upscale,
+        color,
+    )
 }
 
 /// Persist viewing options as
-/// "dir,layout,fit,anim,scroll,resume,theme,perf,spine,spine_strength,no_upscale".
+/// "dir,layout,fit,anim,scroll,resume,theme,perf,spine,spine_strength,no_upscale,color".
 #[allow(clippy::too_many_arguments)]
 fn save_view(
     path: &Path,
@@ -2112,6 +2230,7 @@ fn save_view(
     spine: bool,
     spine_strength: f32,
     no_upscale: bool,
+    color: ColorDetectionPref,
 ) {
     let d = if dir == Direction::Rtl { "rtl" } else { "ltr" };
     let l = lay.label();
@@ -2129,7 +2248,11 @@ fn save_view(
     let sp = if spine { "spine" } else { "nospine" };
     let ss = (spine_strength.clamp(0.0, 1.0) * 100.0).round() as i32;
     let nu = if no_upscale { "noupscale" } else { "stretch" };
-    write_atomic(path, &format!("{d},{l},{f},{a},{s},{r},{t},{p},{sp},{ss},{nu}"));
+    let c = color.label();
+    write_atomic(
+        path,
+        &format!("{d},{l},{f},{a},{s},{r},{t},{p},{sp},{ss},{nu},{c}"),
+    );
 }
 
 fn load_progress(path: &std::path::Path) -> HashMap<String, (u32, u32)> {
@@ -2150,14 +2273,24 @@ fn load_progress(path: &std::path::Path) -> HashMap<String, (u32, u32)> {
 
 fn load_collapsed(path: &std::path::Path) -> std::collections::HashSet<PathBuf> {
     std::fs::read_to_string(path)
-        .map(|s| s.lines().filter(|l| !l.is_empty()).map(PathBuf::from).collect())
+        .map(|s| {
+            s.lines()
+                .filter(|l| !l.is_empty())
+                .map(PathBuf::from)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
 /// Load the most-recently-read list (one volume key per line, newest first).
 fn load_recents(path: &std::path::Path) -> Vec<String> {
     std::fs::read_to_string(path)
-        .map(|s| s.lines().filter(|l| !l.is_empty()).map(String::from).collect())
+        .map(|s| {
+            s.lines()
+                .filter(|l| !l.is_empty())
+                .map(String::from)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -2582,8 +2715,12 @@ fn seekbar(
                     };
                     let fit_rich = match fit {
                         FitMode::Window => egui::RichText::new(ph::ARROWS_OUT).size(22.0),
-                        FitMode::Width => egui::RichText::new(ph::ARROWS_OUT_LINE_HORIZONTAL).size(22.0),
-                        FitMode::Height => egui::RichText::new(ph::ARROWS_OUT_LINE_VERTICAL).size(22.0),
+                        FitMode::Width => {
+                            egui::RichText::new(ph::ARROWS_OUT_LINE_HORIZONTAL).size(22.0)
+                        }
+                        FitMode::Height => {
+                            egui::RichText::new(ph::ARROWS_OUT_LINE_VERTICAL).size(22.0)
+                        }
                         FitMode::Actual => egui::RichText::new("1:1").size(16.0),
                     }
                     .color(fit_color);
@@ -2644,10 +2781,10 @@ fn empty_state(
                     if let Some(tex) = logo {
                         let [w, h] = tex.size();
                         let scale = 84.0 / h as f32;
-                        ui.add(egui::Image::new(tex).fit_to_exact_size(egui::vec2(
-                            w as f32 * scale,
-                            h as f32 * scale,
-                        )));
+                        ui.add(
+                            egui::Image::new(tex)
+                                .fit_to_exact_size(egui::vec2(w as f32 * scale, h as f32 * scale)),
+                        );
                     } else {
                         ui.label(egui::RichText::new("📖").size(56.0));
                     }
@@ -2672,16 +2809,20 @@ fn empty_state(
                         *open_library = true;
                     }
                     if ui
-                        .add(egui::Button::new(egui::RichText::new("Open file…").size(18.0)))
+                        .add(egui::Button::new(
+                            egui::RichText::new("Open file…").size(18.0),
+                        ))
                         .clicked()
                     {
                         *open_picker = true;
                     }
                     ui.add_space(2.0);
                     ui.label(
-                        egui::RichText::new("Tip: tap the top of the screen any time to open your library.")
-                            .size(12.0)
-                            .color(weak),
+                        egui::RichText::new(
+                            "Tip: tap the top of the screen any time to open your library.",
+                        )
+                        .size(12.0)
+                        .color(weak),
                     );
                 });
             });
@@ -2813,9 +2954,13 @@ fn book_prompt_card(
                         return;
                     }
                     ui.label(
-                        egui::RichText::new(if dir > 0 { "Next book" } else { "Previous book" })
-                            .size(18.0)
-                            .strong(),
+                        egui::RichText::new(if dir > 0 {
+                            "Next book"
+                        } else {
+                            "Previous book"
+                        })
+                        .size(18.0)
+                        .strong(),
                     );
                     ui.add_space(8.0);
                     let cover_w = BOOK_PROMPT_W_PT - 24.0;
@@ -2833,9 +2978,7 @@ fn book_prompt_card(
                         .clicked()
                     };
                     ui.add_space(6.0);
-                    ui.add(
-                        egui::Label::new(egui::RichText::new(title).size(14.0)).truncate(),
-                    );
+                    ui.add(egui::Label::new(egui::RichText::new(title).size(14.0)).truncate());
                     ui.label(egui::RichText::new("tap again to open").size(12.0).weak());
                     if clicked {
                         *book_nav = dir;
@@ -2855,7 +2998,12 @@ fn translucent_popup(style: &egui::Style) -> egui::Frame {
         return frame;
     }
     let f = frame.fill;
-    frame.fill(egui::Color32::from_rgba_unmultiplied(f.r(), f.g(), f.b(), 200))
+    frame.fill(egui::Color32::from_rgba_unmultiplied(
+        f.r(),
+        f.g(),
+        f.b(),
+        200,
+    ))
 }
 
 /// A soft drop shadow riding the dragged page's leading edge (page-flip swipe), cast
@@ -2917,8 +3065,11 @@ fn zone_hints(ctx: &egui::Context, rtl: bool, scroll: bool) {
     let font = egui::FontId::proportional(18.0);
     let draw = |pos: egui::Pos2, anchor: egui::Align2, text: &str| {
         // A dark rounded backing keeps the label legible over light pages.
-        let galley =
-            painter.layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::from_white_alpha(235));
+        let galley = painter.layout_no_wrap(
+            text.to_owned(),
+            font.clone(),
+            egui::Color32::from_white_alpha(235),
+        );
         let r = anchor.anchor_size(pos, galley.size());
         painter.rect_filled(
             r.expand2(egui::vec2(10.0, 6.0)),
@@ -2934,7 +3085,11 @@ fn zone_hints(ctx: &egui::Context, rtl: bool, scroll: bool) {
     );
     // Side flip labels only in page-flip.
     if !scroll {
-        let (left, right) = if rtl { ("Next ›", "‹ Prev") } else { ("‹ Prev", "Next ›") };
+        let (left, right) = if rtl {
+            ("Next ›", "‹ Prev")
+        } else {
+            ("‹ Prev", "Next ›")
+        };
         draw(
             egui::pos2(rect.left() + 40.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
@@ -2968,6 +3123,7 @@ fn options_popup(
     scroll_on: bool,
     theme: ThemePref,
     perf: PerfPref,
+    color_detection: ColorDetectionPref,
     rotation: u8,
     set_dir: &mut Option<Direction>,
     set_layout: &mut Option<LayoutMode>,
@@ -2981,6 +3137,7 @@ fn options_popup(
     set_scroll: &mut Option<bool>,
     set_theme: &mut Option<ThemePref>,
     set_perf: &mut Option<PerfPref>,
+    set_color_detection: &mut Option<ColorDetectionPref>,
     toggle_offset: &mut bool,
     rotate: &mut bool,
 ) {
@@ -3214,6 +3371,31 @@ fn options_popup(
                     .size(12.0)
                     .color(egui::Color32::from_white_alpha(150)),
                 );
+
+                ui.label(egui::RichText::new("Color-page detection").strong());
+                ui.horizontal(|ui| {
+                    for (mode, text) in [
+                        (ColorDetectionPref::Off, "Off"),
+                        (ColorDetectionPref::Traditional, "Traditional"),
+                        (ColorDetectionPref::Ml, "ML"),
+                    ] {
+                        let enabled = mode != ColorDetectionPref::Ml
+                            || yosh_engine::decode::ml_color_detection_available();
+                        let response = ui.add_enabled(
+                            enabled,
+                            egui::Button::selectable(
+                                color_detection == mode,
+                                egui::RichText::new(text).size(16.0),
+                            ),
+                        );
+                        if response.clicked() {
+                            *set_color_detection = Some(mode);
+                        }
+                        if !enabled {
+                            response.on_hover_text("OGSOV weights not embedded in this build");
+                        }
+                    }
+                });
             });
         });
 }
@@ -3297,7 +3479,12 @@ fn open_fd(app: &AndroidApp, uri: &str) -> i32 {
 /// flags call). The bridge just `runOnUiThread`s the flag change, fire-and-forget.
 fn set_keep_screen_on(app: &AndroidApp, on: bool) {
     let _ = with_env(app, |env, activity| {
-        env.call_method(activity, "setKeepScreenOn", "(Z)V", &[JValue::Bool(on as u8)])?;
+        env.call_method(
+            activity,
+            "setKeepScreenOn",
+            "(Z)V",
+            &[JValue::Bool(on as u8)],
+        )?;
         Ok(())
     });
 }
@@ -3320,7 +3507,9 @@ fn set_immersive(app: &AndroidApp, immersive: bool) {
 /// library / empty-state chrome so the bars don't cover it.
 fn status_bar_height(app: &AndroidApp) -> i32 {
     with_env(app, |env, activity| {
-        Ok(env.call_method(activity, "statusBarHeight", "()I", &[])?.i()?)
+        Ok(env
+            .call_method(activity, "statusBarHeight", "()I", &[])?
+            .i()?)
     })
     .unwrap_or(0)
 }
@@ -3466,6 +3655,7 @@ impl App {
                     p.path.label().to_string()
                 },
             ));
+            lines.push(("Detection".to_string(), p.color_detection.label()));
             // Single-resize invariant readout: the GPU should sample 1:1.
             let gpu = match self.reader.page_target_h(idx).cmp(&p.target_h) {
                 std::cmp::Ordering::Equal => "1:1",
@@ -3523,7 +3713,9 @@ impl App {
     /// are deliberately **kept** — the current page stays decoded and on screen
     /// while the new pool refills around it.
     fn apply_perf(&mut self) {
-        let tier = self.perf.tier().unwrap_or(self.auto_tier);
+        let tier = self.effective_tier();
+        self.reader
+            .set_decode_options(self.color_detection.decode_options_for_tier(tier));
         let b = Budget::for_tier(tier, self.mem_budget_mb, self.cpus);
         log::info!("perf {} → tier {tier:?}, budget: {b:?}", self.perf.label());
         let current = self.reader.index;
@@ -3542,12 +3734,13 @@ impl App {
         let Some(src) = self.reader.source.clone() else {
             return;
         };
-        let pool = DecodePool::new(
+        let pool = DecodePool::new_with_options(
             src,
             self.ctx.device.clone(),
             self.ctx.queue.clone(),
             self.reader.tex_pool.clone(),
             b.workers,
+            self.reader.decode_options,
         );
         // A fresh pool starts wakerless and with empty queues: re-install the wake
         // callback, then force a full rebuild of both the job list and the
@@ -3559,13 +3752,19 @@ impl App {
         self.reader.prefetch();
     }
 
+    fn effective_tier(&self) -> DeviceTier {
+        self.perf.tier().unwrap_or(self.auto_tier)
+    }
+
     /// Resolve the layout mode against the current viewport and, if it differs from
     /// the engine's concrete layout, switch — re-anchoring the read position into the
     /// new view and re-prefetching. This is what makes `Auto` follow device rotation;
     /// for fixed Single/Spread it's a per-frame no-op. Does NOT persist (the *mode*
     /// is unchanged — only its orientation-dependent resolution).
     fn apply_resolved_layout(&mut self) {
-        let desired = self.layout_mode.resolve(self.config.width, self.config.height);
+        let desired = self
+            .layout_mode
+            .resolve(self.config.width, self.config.height);
         if desired != self.reader.layout {
             self.reader.layout = desired;
             self.reader.snap_to_view_start();
@@ -3640,7 +3839,8 @@ impl App {
             .collect();
 
         let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
+            wgpu::CurrentSurfaceTexture::Success(t)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.ctx.device, &self.config);
                 self.window.request_redraw();
@@ -3669,7 +3869,12 @@ impl App {
                         // Letterbox behind pages: white in light/e-ink mode (a big dark
                         // fill is unusable on a reflective panel), else the dark #202020.
                         load: wgpu::LoadOp::Clear(if light {
-                            wgpu::Color { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }
+                            wgpu::Color {
+                                r: 1.0,
+                                g: 1.0,
+                                b: 1.0,
+                                a: 1.0,
+                            }
                         } else {
                             wgpu::Color {
                                 r: 32.0 / 255.0,
@@ -3701,9 +3906,11 @@ impl App {
             // `queued_covers`, so it isn't retried every frame — it just never
             // gets a thumbnail.
             let Some(img) = img else { continue };
-            let handle =
-                self.egui_ctx
-                    .load_texture(path.to_string_lossy(), img, egui::TextureOptions::default());
+            let handle = self.egui_ctx.load_texture(
+                path.to_string_lossy(),
+                img,
+                egui::TextureOptions::default(),
+            );
             self.thumb_used.insert(path.clone(), self.frame_no);
             self.thumbs.insert(path, handle);
         }
@@ -3755,7 +3962,11 @@ impl App {
         } else {
             self.info_for = None; // rebuild the metadata when the popup is next opened
         }
-        let info_lines = if show_info { self.build_info() } else { Vec::new() };
+        let info_lines = if show_info {
+            self.build_info()
+        } else {
+            Vec::new()
+        };
         let rtl = self.reader.direction == Direction::Rtl;
         let cur_dir = self.reader.direction;
         // Resolved concrete layout (apply_resolved_layout ran at the top of render),
@@ -3772,6 +3983,7 @@ impl App {
         let cur_scroll = self.reader.scroll_mode;
         let cur_theme = self.theme;
         let cur_perf = self.perf;
+        let cur_color_detection = self.color_detection;
         let cur_rotation = self.reader.rotation;
         let drag_seam = self.reader.drag_seam();
         let cur_zoom = self.reader.zoom;
@@ -3821,8 +4033,7 @@ impl App {
                                 label: name_of(v),
                                 thumb: self.thumbs.get(v).cloned(),
                                 state: *st,
-                                is_current: lib.current_key
-                                    == Some(v.to_string_lossy().as_ref()),
+                                is_current: lib.current_key == Some(v.to_string_lossy().as_ref()),
                                 path: v.clone(),
                             })
                             .collect()
@@ -3910,6 +4121,7 @@ impl App {
         let mut set_scroll: Option<bool> = None;
         let mut set_theme: Option<ThemePref> = None;
         let mut set_perf: Option<PerfPref> = None;
+        let mut set_color_detection: Option<ColorDetectionPref> = None;
         let mut toggle_offset = false;
         let mut rotate = false;
         let mut cycle_fit = false;
@@ -4183,6 +4395,7 @@ impl App {
                         cur_scroll,
                         cur_theme,
                         cur_perf,
+                        cur_color_detection,
                         cur_rotation,
                         &mut set_dir,
                         &mut set_layout,
@@ -4195,6 +4408,7 @@ impl App {
                         &mut set_scroll,
                         &mut set_theme,
                         &mut set_perf,
+                        &mut set_color_detection,
                         &mut toggle_offset,
                         &mut rotate,
                     );
@@ -4376,6 +4590,14 @@ impl App {
             self.persist_view();
             self.window.request_redraw();
         }
+        if let Some(mode) = set_color_detection {
+            self.color_detection = mode;
+            self.reader
+                .set_decode_options(mode.decode_options_for_tier(self.effective_tier()));
+            self.info_for = None;
+            self.persist_view();
+            self.window.request_redraw();
+        }
         if cycle_fit {
             if (self.reader.zoom - 1.0).abs() > 0.001 {
                 // Zoomed (in OR out of the fit scale): restore the active fit by
@@ -4444,7 +4666,8 @@ impl App {
                     multiview_mask: None,
                 })
                 .forget_lifetime();
-            self.egui_renderer.render(&mut egui_pass, &primitives, &screen);
+            self.egui_renderer
+                .render(&mut egui_pass, &primitives, &screen);
         }
         for id in &full_output.textures_delta.free {
             self.egui_renderer.free_texture(id);
@@ -4481,7 +4704,8 @@ impl App {
             || self.reader.animation_drawn() // page-turn / drag frame was drawn
             || prompt_visible // boundary prompt on screen (timed; same sample as draw)
             || drew_live_anim // a GIF/WebP is playing on screen
-            || egui_animating // egui fade/feedback animation mid-flight
+            || egui_animating
+        // egui fade/feedback animation mid-flight
         {
             self.window.request_redraw();
         }
@@ -4504,7 +4728,10 @@ fn book_display_name(key: &str) -> String {
         // Minimal percent-decode of just the separators SAF uses, then take the
         // final component. Good enough for a display name; fall back to the raw
         // key if there's nothing better to show.
-        let decoded = key.replace("%2F", "/").replace("%2f", "/").replace("%3A", ":");
+        let decoded = key
+            .replace("%2F", "/")
+            .replace("%2f", "/")
+            .replace("%3A", ":");
         let last = decoded
             .rsplit(['/', ':'])
             .find(|s| !s.is_empty())

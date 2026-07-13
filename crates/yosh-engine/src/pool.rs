@@ -13,9 +13,9 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use fast_image_resize::Resizer;
 
-use crate::decode::{decode_page, DecodedPage};
-use crate::source::PageSource;
+use crate::decode::{DecodeOptions, DecodedPage, decode_page_with_options};
 use crate::page::{PagePipeline, PageTexture};
+use crate::source::PageSource;
 use crate::texpool::TexturePool;
 
 // `Done` (a full `PageTexture`) dwarfs `Failed` (a `String`); boxing it would buy
@@ -215,6 +215,24 @@ impl DecodePool {
         tex_pool: Arc<TexturePool>,
         workers: usize,
     ) -> Self {
+        Self::new_with_options(
+            source,
+            device,
+            queue,
+            tex_pool,
+            workers,
+            DecodeOptions::default(),
+        )
+    }
+
+    pub fn new_with_options(
+        source: Arc<dyn PageSource>,
+        device: Arc<wgpu::Device>,
+        queue: Arc<wgpu::Queue>,
+        tex_pool: Arc<TexturePool>,
+        workers: usize,
+        options: DecodeOptions,
+    ) -> Self {
         let shared = Arc::new((
             Mutex::new(JobState {
                 jobs: VecDeque::new(),
@@ -316,7 +334,8 @@ impl DecodePool {
                             return None;
                         }
 
-                        let decoded = decode_page(&bytes, th, lq, &mut resizer);
+                        let decoded =
+                            decode_page_with_options(&bytes, th, lq, options, &mut resizer);
 
                         // Bail before upload if the page left the window during the decode —
                         // skips the GPU upload, the texpool/cache churn, and a pointless `Done`.

@@ -80,6 +80,29 @@ impl PerfPref {
     }
 }
 
+/// Color-stored page classification before HQ downscale.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorDetectionPref {
+    Off,
+    #[default]
+    Traditional,
+    Ml,
+}
+
+impl ColorDetectionPref {
+    pub fn decode_options(self) -> yosh_engine::decode::DecodeOptions {
+        use yosh_engine::decode::{ColorDetection, DecodeOptions};
+        DecodeOptions {
+            color_detection: match self {
+                Self::Off => ColorDetection::Off,
+                Self::Traditional => ColorDetection::Traditional,
+                Self::Ml => ColorDetection::Ml,
+            },
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct Settings {
@@ -91,6 +114,8 @@ pub struct Settings {
     pub scroll: bool,
     /// Downscale pages on the GPU instead of on the CPU.
     pub gpu: bool,
+    /// Color-page detection used by HQ CPU downscale.
+    pub color_detection: ColorDetectionPref,
     /// Last library root folder (browse grid).
     pub library_root: Option<String>,
     /// Most-recently-read volume paths, newest first, deduped, capped at
@@ -158,6 +183,7 @@ impl Default for Settings {
             layout_spread: false,
             scroll: false,
             gpu: false,
+            color_detection: ColorDetectionPref::Traditional,
             library_root: None,
             recents: Vec::new(),
             resume_on_startup: true,

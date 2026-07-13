@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use crate::decode::{DecodedImage, ResizePath};
+use crate::decode::{ColorDetectionOutcome, DecodedImage, ResizePath};
 use crate::texpool::TexturePool;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -186,6 +186,8 @@ pub struct PageTexture {
     pub gray: bool,
     /// Which CPU resize path produced this page (for the info overlay readout).
     pub path: ResizePath,
+    /// Color classifier result retained for image info overlays.
+    pub color_detection: ColorDetectionOutcome,
     /// Decode target height this page was produced for (the `target_h` the pool
     /// used). Lets the cache detect pages decoded at a stale resolution after a
     /// zoom/resize and re-decode them in place without blanking the display.
@@ -272,6 +274,7 @@ impl PageTexture {
             src_h: _,
             gray,
             path: _,
+            color_detection: _,
             target_h: _,
             lq: _,
             anim,
@@ -441,6 +444,7 @@ impl PagePipeline {
             src_h: img.src_h,
             gray: img.gray,
             path: img.path,
+            color_detection: img.color_detection,
             target_h,
             lq: false,
             anim: None,
