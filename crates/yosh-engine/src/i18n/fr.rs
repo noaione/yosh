@@ -76,9 +76,21 @@ pub static FR: Strings = Strings {
     info_resolution: "Résolution",
     info_format: "Format",
     info_color: "Couleur",
+    info_detection: "Détection",
+    info_detection_not_run: "non exécuté",
+    info_detection_source_gray: "source en niveaux de gris",
+    info_detection_traditional: |state| format!("Classique · {state}"),
+    info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · confiance : {confidence} %"),
+    info_detection_unavailable: "OGSOV indisponible (poids manquants)",
+    info_detection_transparent: "non exécuté (image transparente)",
+    color_state_color: "couleur",
+    color_state_grayscale: "niveaux de gris",
     info_zoom: "Zoom",
     info_resize: "Redimensionnement",
     info_lq_tier: "Niveau LQ",
+    info_lq_preview: "Aperçu LQ",
+    info_hq: "HQ",
+    info_fling: |vy, glide| format!("relâchement {vy:.0} px/s · glissement {glide:.0} px/s"),
 
     // --- desktop: top bar ---
     open_folder: "Ouvrir un dossier…",
@@ -178,6 +190,10 @@ pub static FR: Strings = Strings {
     stretch_hint_key: "Non : l’ajustement ne dépasse jamais 100 % natif (le zoom le peut) — Z",
     spine_shadow_two_page: "Ombre de reliure (double page)",
     spine_hint: "Ombrage de la reliure sur les doubles pages non jointes",
+    color_page_detection: "Détection des pages couleur",
+    color_detection_traditional: "Classique",
+    color_detection_ml: "ML",
+    color_detection_weights_missing: "Les poids OGSOV ne sont pas inclus dans cette version",
     perf_auto_now: |tier, battery| {
         format!("Auto — actuellement {tier} ({})", if battery { "sur batterie" } else { "sur secteur" })
     },

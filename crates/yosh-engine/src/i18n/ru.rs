@@ -77,9 +77,21 @@ pub static RU: Strings = Strings {
     info_resolution: "Разрешение",
     info_format: "Формат",
     info_color: "Цвет",
+    info_detection: "Обнаружение",
+    info_detection_not_run: "не запускалось",
+    info_detection_source_gray: "исходник в оттенках серого",
+    info_detection_traditional: |state| format!("Традиционный метод · {state}"),
+    info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · уверенность: {confidence}%"),
+    info_detection_unavailable: "OGSOV недоступен (нет весов)",
+    info_detection_transparent: "не запускалось (прозрачное изображение)",
+    color_state_color: "цвет",
+    color_state_grayscale: "оттенки серого",
     info_zoom: "Масштаб",
     info_resize: "Ресемплинг",
     info_lq_tier: "Уровень LQ",
+    info_lq_preview: "Предпросмотр LQ",
+    info_hq: "HQ",
+    info_fling: |vy, glide| format!("при отпускании {vy:.0} px/s · скольжение {glide:.0} px/s"),
 
     // --- desktop: top bar ---
     open_folder: "Открыть папку…",
@@ -179,6 +191,10 @@ pub static RU: Strings = Strings {
     stretch_hint_key: "Выкл: подгонка не больше 100% оригинала (масштабировать можно) — Z",
     spine_shadow_two_page: "Тень корешка (разворот)",
     spine_hint: "Затенение корешка на несклеенных разворотах",
+    color_page_detection: "Обнаружение цветных страниц",
+    color_detection_traditional: "Традиционный метод",
+    color_detection_ml: "ML",
+    color_detection_weights_missing: "В этой сборке нет весов OGSOV",
     perf_auto_now: |tier, battery| {
         format!("Авто — сейчас: {tier} ({})", if battery { "от батареи" } else { "от сети" })
     },

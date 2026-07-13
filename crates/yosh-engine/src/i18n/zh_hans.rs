@@ -76,9 +76,21 @@ pub static ZH_HANS: Strings = Strings {
     info_resolution: "分辨率",
     info_format: "格式",
     info_color: "色彩",
+    info_detection: "检测",
+    info_detection_not_run: "未运行",
+    info_detection_source_gray: "源图为灰度",
+    info_detection_traditional: |state| format!("传统 · {state}"),
+    info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · 置信度: {confidence}%"),
+    info_detection_unavailable: "OGSOV 不可用（缺少权重）",
+    info_detection_transparent: "未运行（透明图像）",
+    color_state_color: "彩色",
+    color_state_grayscale: "灰度",
     info_zoom: "缩放",
     info_resize: "重采样",
     info_lq_tier: "LQ 预览",
+    info_lq_preview: "LQ 预览",
+    info_hq: "HQ",
+    info_fling: |vy, glide| format!("释放时 {vy:.0} px/s · 惯性滑动 {glide:.0} px/s"),
 
     // --- desktop: top bar ---
     open_folder: "打开文件夹…",
@@ -178,6 +190,10 @@ pub static ZH_HANS: Strings = Strings {
     stretch_hint_key: "关: 适应时不超过原始 100%（仍可缩放）— Z",
     spine_shadow_two_page: "书脊阴影（双页）",
     spine_hint: "在未拼合的双页中缝处添加阴影",
+    color_page_detection: "彩色页面检测",
+    color_detection_traditional: "传统",
+    color_detection_ml: "ML",
+    color_detection_weights_missing: "此版本未嵌入 OGSOV 权重",
     perf_auto_now: |tier, battery| {
         format!("自动 — 当前为{tier}（{}）", if battery { "使用电池" } else { "已接通电源" })
     },

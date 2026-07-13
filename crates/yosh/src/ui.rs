@@ -55,6 +55,7 @@ pub struct UiState {
     pub perf_auto: String,
     /// The language picker's selection: `None` = follow the OS. Set each frame.
     pub lang_pref: Option<yosh_engine::i18n::Lang>,
+    pub color_detection: crate::config::ColorDetectionPref,
     /// Whether a volume is currently loaded. Distinguishes the onboarding panel
     /// (nothing open) from the library grid; set by the app each frame.
     pub reader_open: bool,
@@ -96,6 +97,8 @@ pub struct UiState {
     pub req_set_perf: Option<crate::config::PerfPref>,
     /// Language picked in the panel (`Some(None)` = back to following the OS).
     pub req_set_lang: Option<Option<yosh_engine::i18n::Lang>>,
+    /// Direct color-detection selection from the panel.
+    pub req_set_color_detection: Option<crate::config::ColorDetectionPref>,
     /// Rescan the current library root (toolbar ⟳). Drained by the app.
     pub rescan: bool,
     /// Series whose section the user clicked to expand/collapse this frame
@@ -119,14 +122,10 @@ pub struct UiState {
     /// Tab info overlay: whether it's shown, and its (label, value) lines (built
     /// by the app for the current page).
     pub info_open: bool,
-    pub info: Vec<(String, String)>,
+    pub info: Vec<(String, Option<String>)>,
     /// Current zoom percent (native-relative), appended live to the info overlay
     /// (refreshed every frame so it tracks zooming without rebuilding page info).
     pub zoom_pct: f32,
-    /// Live resize-pipeline readout for the in-view page (CPU path → GPU state),
-    /// appended to the info overlay each frame so HQ vs. a stray GPU resize is
-    /// always visible. Empty when nothing is decoded yet.
-    pub resize_path: String,
     /// Touch scroll physics readout `(last release velocity, live glide velocity)`
     /// in px/s, appended to the info overlay once a touch fling has happened —
     /// makes "no physics" reports diagnosable from a screenshot. None until then.
@@ -221,7 +220,10 @@ fn nav_arrow(ctx: &egui::Context, id: &str, align: egui::Align2, offset: egui::V
             let stroke = egui::Stroke::new(5.0_f32, egui::Color32::from_white_alpha(205));
             let (dx, dy) = (10.0, 18.0);
             let (tip, back) = if left { (-dx, dx) } else { (dx, -dx) };
-            p.line_segment([c + egui::vec2(back, -dy), c + egui::vec2(tip, 0.0)], stroke);
+            p.line_segment(
+                [c + egui::vec2(back, -dy), c + egui::vec2(tip, 0.0)],
+                stroke,
+            );
             p.line_segment([c + egui::vec2(tip, 0.0), c + egui::vec2(back, dy)], stroke);
         });
 }
@@ -277,8 +279,10 @@ fn seekbar_bar(ctx: &egui::Context, st: &mut UiState) {
                 .show(ui, |ui| {
                     // A tall hit-rect: the whole bar is clickable/draggable, so
                     // height is the vertical click target — keep it generous.
-                    let (rect, resp) = ui
-                        .allocate_exact_size(egui::vec2(bar_w, 30.0), egui::Sense::click_and_drag());
+                    let (rect, resp) = ui.allocate_exact_size(
+                        egui::vec2(bar_w, 30.0),
+                        egui::Sense::click_and_drag(),
+                    );
 
                     let r = 11.0_f32; // handle radius
                     let x0 = rect.left() + r; // handle-center span, inset by the radius
@@ -287,7 +291,13 @@ fn seekbar_bar(ctx: &egui::Context, st: &mut UiState) {
                     let cy = rect.center().y;
 
                     // Direction-aware mapping between a page fraction and an x.
-                    let x_of = |frac: f32| if rtl { x1 - frac * span } else { x0 + frac * span };
+                    let x_of = |frac: f32| {
+                        if rtl {
+                            x1 - frac * span
+                        } else {
+                            x0 + frac * span
+                        }
+                    };
                     let page_at = |px: f32| {
                         let t = ((px - x0) / span).clamp(0.0, 1.0); // LTR fraction
                         let frac = if rtl { 1.0 - t } else { t };
@@ -412,7 +422,8 @@ fn anim_panel(ctx: &egui::Context, st: &mut UiState) {
                 .corner_radius(egui::CornerRadius::same(9))
                 .show(ui, |ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.visuals_mut().override_text_color = Some(egui::Color32::from_white_alpha(235));
+                    ui.visuals_mut().override_text_color =
+                        Some(egui::Color32::from_white_alpha(235));
                     ui.horizontal(|ui| {
                         // Play/pause — only for an actual animation (GIF/WebP).
                         // `.ico` layers are static, so the button is omitted and the
@@ -473,8 +484,10 @@ fn anim_panel(ctx: &egui::Context, st: &mut UiState) {
                         }
 
                         // Click/drag the progress track to seek to a frame.
-                        let (rect, resp) = ui
-                            .allocate_exact_size(egui::vec2(96.0, 14.0), egui::Sense::click_and_drag());
+                        let (rect, resp) = ui.allocate_exact_size(
+                            egui::vec2(96.0, 14.0),
+                            egui::Sense::click_and_drag(),
+                        );
                         let x0 = rect.left() + 3.0;
                         let x1 = rect.right() - 3.0;
                         let span = (x1 - x0).max(1.0);
@@ -708,24 +721,27 @@ pub fn chrome(
                             .num_columns(2)
                             .spacing([14.0, 3.0])
                             .show(ui, |ui| {
-                                for (k, v) in &st.info {
-                                    // An empty pair separates the two halves of a
-                                    // spread — draw a rule rather than a blank row.
-                                    if k.is_empty() && v.is_empty() {
-                                        ui.separator();
-                                        ui.separator();
+                                for (k, v_opt) in &st.info {
+                                    if let Some(v) = v_opt {
+                                        // An empty pair separates the two halves of a
+                                        // spread — draw a rule rather than a blank row.
+                                        if k.is_empty() && v.is_empty() {
+                                            ui.separator();
+                                            ui.separator();
+                                            ui.end_row();
+                                            continue;
+                                        }
+                                        ui.label(
+                                            egui::RichText::new(k)
+                                                .color(egui::Color32::from_gray(150)),
+                                        );
+                                        ui.label(
+                                            egui::RichText::new(v)
+                                                .color(egui::Color32::WHITE)
+                                                .monospace(),
+                                        );
                                         ui.end_row();
-                                        continue;
                                     }
-                                    ui.label(
-                                        egui::RichText::new(k).color(egui::Color32::from_gray(150)),
-                                    );
-                                    ui.label(
-                                        egui::RichText::new(v)
-                                            .color(egui::Color32::WHITE)
-                                            .monospace(),
-                                    );
-                                    ui.end_row();
                                 }
                                 // Live view state (refreshed every frame, not cached with the page).
                                 ui.label(
@@ -743,11 +759,9 @@ pub fn chrome(
                                             .color(egui::Color32::from_gray(150)),
                                     );
                                     ui.label(
-                                        egui::RichText::new(format!(
-                                            "release {vy:.0} px/s · glide {glide:.0} px/s"
-                                        ))
-                                        .color(egui::Color32::WHITE)
-                                        .monospace(),
+                                        egui::RichText::new((tr().info_fling)(vy, glide))
+                                            .color(egui::Color32::WHITE)
+                                            .monospace(),
                                     );
                                     ui.end_row();
                                 }
@@ -837,7 +851,10 @@ pub fn chrome(
         let extra = msg.matches('\n').count() as f32;
         let row_h = ctx.fonts_mut(|f| f.row_height(&egui::FontId::proportional(15.0)));
         egui::Area::new(egui::Id::new("toast"))
-            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -96.0 + extra * row_h))
+            .anchor(
+                egui::Align2::CENTER_BOTTOM,
+                egui::vec2(0.0, -96.0 + extra * row_h),
+            )
             .order(egui::Order::Foreground)
             .interactable(false)
             .show(ctx, |ui| {
@@ -852,7 +869,9 @@ pub fn chrome(
                         // stays put across zoom levels.
                         ui.add(
                             egui::Label::new(
-                                egui::RichText::new(msg).color(egui::Color32::WHITE).size(15.0),
+                                egui::RichText::new(msg)
+                                    .color(egui::Color32::WHITE)
+                                    .size(15.0),
                             )
                             .wrap_mode(egui::TextWrapMode::Extend)
                             .halign(egui::Align::Center),
@@ -863,10 +882,22 @@ pub fn chrome(
 
     // Page-flip affordance: a chevron at whichever edge the cursor hovers.
     if st.hover_left {
-        nav_arrow(ctx, "nav_arrow_left", egui::Align2::LEFT_CENTER, egui::vec2(20.0, 0.0), true);
+        nav_arrow(
+            ctx,
+            "nav_arrow_left",
+            egui::Align2::LEFT_CENTER,
+            egui::vec2(20.0, 0.0),
+            true,
+        );
     }
     if st.hover_right {
-        nav_arrow(ctx, "nav_arrow_right", egui::Align2::RIGHT_CENTER, egui::vec2(-20.0, 0.0), false);
+        nav_arrow(
+            ctx,
+            "nav_arrow_right",
+            egui::Align2::RIGHT_CENTER,
+            egui::vec2(-20.0, 0.0),
+            false,
+        );
     }
 
     if st.seek_show {
@@ -1163,6 +1194,31 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
             if st.perf == crate::config::PerfPref::Auto && !st.perf_auto.is_empty() {
                 ui.label(egui::RichText::new(&st.perf_auto).weak().small());
             }
+
+            ui.label(egui::RichText::new(t.color_page_detection).strong());
+            ui.horizontal(|ui| {
+                for (mode, text) in [
+                    (crate::config::ColorDetectionPref::Off, t.off),
+                    (
+                        crate::config::ColorDetectionPref::Traditional,
+                        t.color_detection_traditional,
+                    ),
+                    (crate::config::ColorDetectionPref::Ml, t.color_detection_ml),
+                ] {
+                    let enabled = mode != crate::config::ColorDetectionPref::Ml
+                        || yosh_engine::decode::ml_color_detection_available();
+                    let response = ui.add_enabled(
+                        enabled,
+                        egui::Button::selectable(st.color_detection == mode, text),
+                    );
+                    if response.clicked() {
+                        st.req_set_color_detection = Some(mode);
+                    }
+                    if !enabled {
+                        response.on_hover_text(t.color_detection_weights_missing);
+                    }
+                }
+            });
         });
     st.settings_open = open;
 }
@@ -1177,7 +1233,10 @@ fn onboarding(ui: &mut egui::Ui, st: &mut UiState) {
     if st.logo.is_none()
         && let Some(img) = decode_logo()
     {
-        st.logo = Some(ui.ctx().load_texture("yosh_logo", img, egui::TextureOptions::LINEAR));
+        st.logo = Some(
+            ui.ctx()
+                .load_texture("yosh_logo", img, egui::TextureOptions::LINEAR),
+        );
     }
     ui.add_space(ui.available_height() * 0.16);
     ui.vertical_centered(|ui| {
@@ -1186,10 +1245,10 @@ fn onboarding(ui: &mut egui::Ui, st: &mut UiState) {
         if let Some(tex) = &st.logo {
             let [w, h] = tex.size();
             let scale = 120.0 / h as f32;
-            ui.add(egui::Image::new(tex).fit_to_exact_size(egui::vec2(
-                w as f32 * scale,
-                h as f32 * scale,
-            )));
+            ui.add(
+                egui::Image::new(tex)
+                    .fit_to_exact_size(egui::vec2(w as f32 * scale, h as f32 * scale)),
+            );
         } else {
             ui.label(egui::RichText::new("📖").size(56.0));
         }
@@ -1369,11 +1428,7 @@ fn library_sections(ui: &mut egui::Ui, st: &mut UiState, lib: &Library, libctx: 
                     // rather than pushed to the far right: text near the right edge
                     // of this nested scroll-area layout doesn't paint reliably.
                     ui.add_space(10.0);
-                    ui.label(
-                        egui::RichText::new(format!("· {status}"))
-                            .size(13.0)
-                            .weak(),
-                    );
+                    ui.label(egui::RichText::new(format!("· {status}")).size(13.0).weak());
                 },
             );
             let rect = header.response.rect;

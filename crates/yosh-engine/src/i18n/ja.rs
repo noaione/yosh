@@ -76,9 +76,21 @@ pub static JA: Strings = Strings {
     info_resolution: "解像度",
     info_format: "形式",
     info_color: "カラー",
+    info_detection: "判定",
+    info_detection_not_run: "未実行",
+    info_detection_source_gray: "元画像はグレースケール",
+    info_detection_traditional: |state| format!("従来方式 · {state}"),
+    info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · 信頼度: {confidence}%"),
+    info_detection_unavailable: "OGSOV を利用できません (重みデータなし)",
+    info_detection_transparent: "未実行 (透明画像)",
+    color_state_color: "カラー",
+    color_state_grayscale: "グレースケール",
     info_zoom: "ズーム",
     info_resize: "リサイズ",
     info_lq_tier: "LQ プレビュー",
+    info_lq_preview: "LQ プレビュー",
+    info_hq: "HQ",
+    info_fling: |vy, glide| format!("離した時 {vy:.0} px/s · 滑走 {glide:.0} px/s"),
 
     // --- desktop: top bar ---
     open_folder: "フォルダーを開く…",
@@ -178,6 +190,10 @@ pub static JA: Strings = Strings {
     stretch_hint_key: "オフ: 原寸 100% を超えて拡大しない (ズームは可能) — Z",
     spine_shadow_two_page: "ノド影 (見開き)",
     spine_hint: "つながっていない見開きの綴じ目に影をつける",
+    color_page_detection: "カラー画像の判定",
+    color_detection_traditional: "従来方式",
+    color_detection_ml: "ML",
+    color_detection_weights_missing: "このビルドには OGSOV の重みデータが含まれていません",
     perf_auto_now: |tier, battery| {
         format!("自動 — 現在: {tier} ({})", if battery { "バッテリー駆動" } else { "電源接続中" })
     },

@@ -76,9 +76,21 @@ pub static KO: Strings = Strings {
     info_resolution: "해상도",
     info_format: "형식",
     info_color: "색상",
+    info_detection: "감지",
+    info_detection_not_run: "실행 안 됨",
+    info_detection_source_gray: "원본 그레이스케일",
+    info_detection_traditional: |state| format!("기존 방식 · {state}"),
+    info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · 신뢰도: {confidence}%"),
+    info_detection_unavailable: "OGSOV 사용할 수 없음 (가중치 파일 없음)",
+    info_detection_transparent: "실행 안 됨 (투명 이미지)",
+    color_state_color: "컬러",
+    color_state_grayscale: "그레이스케일",
     info_zoom: "배율",
     info_resize: "리샘플링",
     info_lq_tier: "LQ 미리보기",
+    info_lq_preview: "LQ 미리보기",
+    info_hq: "HQ",
+    info_fling: |vy, glide| format!("놓을 때 {vy:.0} px/s · 관성 이동 {glide:.0} px/s"),
 
     // --- desktop: top bar ---
     open_folder: "폴더 열기…",
@@ -178,6 +190,10 @@ pub static KO: Strings = Strings {
     stretch_hint_key: "끄기: 맞춤이 원본 100%를 넘지 않음 (확대/축소는 가능) — Z",
     spine_shadow_two_page: "제본 그림자 (두 쪽)",
     spine_hint: "붙지 않은 두 쪽의 가운데에 그림자 표시",
+    color_page_detection: "컬러 페이지 감지",
+    color_detection_traditional: "기존 방식",
+    color_detection_ml: "ML",
+    color_detection_weights_missing: "이 빌드에는 OGSOV 가중치가 포함되어 있지 않습니다",
     perf_auto_now: |tier, battery| {
         format!("자동 — 현재 {tier} ({})", if battery { "배터리 사용 중" } else { "전원 연결됨" })
     },

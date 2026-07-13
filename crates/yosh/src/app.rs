@@ -22,16 +22,17 @@ use notify::Watcher as _; // brings the `.watch()` method into scope
 use crate::config;
 use crate::gpu::Gpu;
 use crate::library::{cover_bytes, Library, VolKind};
-use yosh_engine::gesture::{GestureCtx, GestureEvent, Phase, TouchGestures};
-use yosh_engine::i18n::{self, tr, Lang};
-use yosh_engine::page::{FitMode, PagePipeline};
-use yosh_engine::pool::{DecodePool, Waker};
-use yosh_engine::source::{is_image_ext, FolderSource, PageSource, RarSource, SevenzSource, ZipSource};
-use yosh_engine::layout::Layout;
-use yosh_engine::reader::{Budget, DeviceTier, Direction, Reader, Viewport};
-use yosh_engine::texpool::TexturePool;
 use crate::ui::{self, UiState};
 use crate::update;
+use yosh_engine::gesture::{GestureCtx, GestureEvent, Phase, TouchGestures};
+use yosh_engine::layout::Layout;
+use yosh_engine::page::{FitMode, PagePipeline};
+use yosh_engine::pool::{DecodePool, Waker};
+use yosh_engine::reader::{Budget, DeviceTier, Direction, Reader, Viewport};
+use yosh_engine::source::{
+    FolderSource, PageSource, RarSource, SevenzSource, ZipSource, is_image_ext,
+};
+use yosh_engine::texpool::TexturePool;
 
 /// Memory (MB) the reader may spend on its page cache + GPU textures. A slice of
 /// system RAM on the desktop; an Android shell would pass its per-app heap class.
@@ -130,6 +131,24 @@ fn effective_tier(perf: config::PerfPref, on_battery: bool) -> DeviceTier {
     })
 }
 
+/// ML color detection costs enough CPU to be wrong for an unplugged laptop or an
+/// explicit Low profile. Keep the saved preference intact; this only selects the
+/// decoder policy currently applied to workers.
+fn effective_decode_options(
+    color_detection: config::ColorDetectionPref,
+    perf: config::PerfPref,
+    on_battery: bool,
+) -> yosh_engine::decode::DecodeOptions {
+    if color_detection == config::ColorDetectionPref::Ml
+        && ((perf == config::PerfPref::Auto && on_battery)
+            || effective_tier(perf, on_battery) == DeviceTier::Low)
+    {
+        config::ColorDetectionPref::Traditional.decode_options()
+    } else {
+        color_detection.decode_options()
+    }
+}
+
 /// How often `Auto` re-checks the power source. The probe is one syscall, so the
 /// interval is belt-and-braces rather than a cost concern: it keeps the check off
 /// the per-frame path during a fast seek, and a plug/unplug taking up to this long
@@ -198,7 +217,13 @@ struct Playback {
 
 impl Default for Playback {
     fn default() -> Self {
-        Playback { hidden: false, playing: true, page: None, frame: 0, last: Instant::now() }
+        Playback {
+            hidden: false,
+            playing: true,
+            page: None,
+            frame: 0,
+            last: Instant::now(),
+        }
     }
 }
 
@@ -227,7 +252,7 @@ struct State {
     /// zoom would tear through the ladder. Reset whenever the wheel reverses.
     zoom_notches: f32,
     mouse_down: bool,
-    drag_dist: f32, // accumulated drag distance, to distinguish click from pan
+    drag_dist: f32,         // accumulated drag distance, to distinguish click from pan
     cursor_in_window: bool, // gates the edge-hover navigation arrows
     modifiers: ModifiersState,
     last_mid_click: Option<Instant>, // middle-zone double-click → fullscreen
@@ -415,7 +440,11 @@ type WatchInstall = (u64, Option<(notify::RecommendedWatcher, Option<PathBuf>)>)
 /// it was gathered for, and one `(page index, rows)` block per visible page. The
 /// two tags let the main thread drop a result it has already moved past — a volume
 /// switch bumps the generation, a page turn changes the key.
-type InfoRows = (u64, (usize, Option<usize>), Vec<(usize, Vec<(String, String)>)>);
+type InfoRows = (
+    u64,
+    (usize, Option<usize>),
+    Vec<(usize, Vec<(String, Option<String>)>)>,
+);
 
 /// Bump `key` to the front of the most-recently-read list (newest first), drop any
 /// older duplicate, and cap the length. Generic over the key string so the resume
@@ -467,7 +496,11 @@ fn build_source(path: &Path, resume: Option<usize>) -> Built {
                         .file_name()
                         .and_then(|n| n.to_str())
                         .and_then(|n| s.index_of_name(n));
-                    (Arc::new(s) as Arc<dyn PageSource>, parent.to_path_buf(), start)
+                    (
+                        Arc::new(s) as Arc<dyn PageSource>,
+                        parent.to_path_buf(),
+                        start,
+                    )
                 })
                 .map_err(|e| e.to_string())
         }
@@ -732,11 +765,11 @@ fn window_icon() -> Option<winit::window::Icon> {
 #[cfg(windows)]
 fn bind_exe_icon(window: &Window) {
     use std::os::windows::ffi::OsStrExt;
-    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use windows_sys::Win32::UI::Shell::ExtractIconExW;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GCLP_HICON, GCLP_HICONSM, ICON_BIG, ICON_SMALL, SendMessageW, SetClassLongPtrW, WM_SETICON,
     };
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
     let hwnd = match window.window_handle().map(|h| h.as_raw()) {
         Ok(RawWindowHandle::Win32(h)) => h.hwnd.get() as *mut core::ffi::c_void,
@@ -745,7 +778,11 @@ fn bind_exe_icon(window: &Window) {
     let Ok(exe) = std::env::current_exe() else {
         return;
     };
-    let wide: Vec<u16> = exe.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = exe
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
 
     let mut large: *mut core::ffi::c_void = std::ptr::null_mut();
     let mut small: *mut core::ffi::c_void = std::ptr::null_mut();
@@ -782,7 +819,11 @@ fn reveal_in_explorer(path: &std::path::Path) {
     };
     use windows_sys::Win32::UI::Shell::{ILCreateFromPathW, ILFree, SHOpenFolderAndSelectItems};
 
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
     std::thread::spawn(move || unsafe {
         let _ = CoInitializeEx(std::ptr::null(), COINIT_APARTMENTTHREADED as u32);
         let pidl = ILCreateFromPathW(wide.as_ptr());
@@ -951,7 +992,9 @@ impl ApplicationHandler for App {
         // pinned choice overrides both. `for_tier(High, ..)` *is* `derive(..)` —
         // pinned by the engine's `for_tier_high_is_exactly_derive` — so a plugged-in
         // machine on `Auto` gets exactly the budget it always got.
-        let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(4);
+        let cpus = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
         let mem_budget_mb = detect_mem_budget_mb();
         let on_battery = on_battery().unwrap_or(false);
         let tier = effective_tier(settings.perf, on_battery);
@@ -1067,6 +1110,8 @@ impl ApplicationHandler for App {
         reader.transition_enabled = settings.page_transition_enabled;
         reader.fit_no_upscale = settings.no_stretch;
         reader.spine_strength = effective_spine(&settings);
+        reader.decode_options =
+            effective_decode_options(settings.color_detection, settings.perf, on_battery);
         // Decode→UI wakeup: a worker that finishes a page schedules the frame that
         // draws it (winit's `request_redraw` is thread-safe), so the loop doesn't
         // have to keep drawing on the chance that one landed. Set once here and
@@ -1236,7 +1281,9 @@ impl ApplicationHandler for App {
                     // Ctrl/Alt/Super combinations belong to focused tools and OS chrome.
                 } else if is_escape(&event) && state.close_top_overlay() {
                     // Escape closes focused app chrome before it can quit the app.
-                } else if let Some(action) = action_from(&event) && !response.consumed {
+                } else if let Some(action) = action_from(&event)
+                    && !response.consumed
+                {
                     if matches!(action, Action::Quit) {
                         // Immediate exit, skipping destructor teardown — see
                         // `CloseRequested` above.
@@ -1292,7 +1339,7 @@ impl ApplicationHandler for App {
             WindowEvent::ModifiersChanged(m) => {
                 state.modifiers = m.state();
                 state.ctrl_held = state.modifiers.control_key()
-            },
+            }
             WindowEvent::Focused(false) => {
                 state.cursor_in_window = false;
                 // A Ctrl-held alt-tab releases the key while we're unfocused, so the
@@ -1404,7 +1451,9 @@ enum Action {
 fn action_from(ev: &KeyEvent) -> Option<Action> {
     if let PhysicalKey::Code(c) = ev.physical_key {
         match c {
-            KeyCode::ArrowDown | KeyCode::Space | KeyCode::PageDown => return Some(Action::Forward),
+            KeyCode::ArrowDown | KeyCode::Space | KeyCode::PageDown => {
+                return Some(Action::Forward);
+            }
             KeyCode::ArrowUp | KeyCode::PageUp => return Some(Action::Backward),
             KeyCode::ArrowRight => return Some(Action::Right),
             KeyCode::ArrowLeft => return Some(Action::Left),
@@ -1459,9 +1508,8 @@ fn action_from(ev: &KeyEvent) -> Option<Action> {
 /// source, because it runs on a **background** thread — `read_page` and `modified`
 /// are disk I/O, and on a RAR still decompressing `read_page` blocks until that
 /// entry lands, which would freeze the UI for as long as the extraction takes.
-/// The cache-derived "LQ tier" row needs no I/O and is appended by the main
-/// thread when this result is applied.
-fn page_info(src: &dyn PageSource, index: usize) -> Vec<(String, String)> {
+/// Cache- and view-derived rows are appended and refreshed by the main thread.
+fn page_info(src: &dyn PageSource, index: usize) -> Vec<(String, Option<String>)> {
     let name = src.name(index).to_string();
     let bytes = src.read_page(index).ok();
     let (res, fmt, size, color) = match &bytes {
@@ -1476,7 +1524,12 @@ fn page_info(src: &dyn PageSource, index: usize) -> Vec<(String, String)> {
                 .as_deref()
                 .and_then(yosh_engine::icc::describe)
                 .unwrap_or_else(|| "—".to_string());
-            (res, detail, yosh_engine::meta::human_size(b.len() as u64), color)
+            (
+                res,
+                detail,
+                yosh_engine::meta::human_size(b.len() as u64),
+                color,
+            )
         }
         None => (
             "—".to_string(),
@@ -1487,13 +1540,16 @@ fn page_info(src: &dyn PageSource, index: usize) -> Vec<(String, String)> {
     };
     let modified = src.modified(index).unwrap_or_else(|| "—".to_string());
     vec![
-        (tr().info_file.to_string(), name),
-        (tr().info_page.to_string(), format!("{} / {}", index + 1, src.len())),
-        (tr().info_size.to_string(), size),
-        (tr().info_modified.to_string(), modified),
-        (tr().info_resolution.to_string(), res),
-        (tr().info_format.to_string(), fmt),
-        (tr().info_color.to_string(), color),
+        (tr().info_file.to_string(), Some(name)),
+        (
+            tr().info_page.to_string(),
+            Some(format!("{} / {}", index + 1, src.len())),
+        ),
+        (tr().info_size.to_string(), Some(size)),
+        (tr().info_modified.to_string(), Some(modified)),
+        (tr().info_resolution.to_string(), Some(res)),
+        (tr().info_format.to_string(), Some(fmt)),
+        (tr().info_color.to_string(), Some(color)),
     ]
 }
 
@@ -1536,10 +1592,20 @@ impl State {
             }
             // In RTL, "left" advances the story; in LTR, "right" does. (Page-flip only.)
             Action::Right if !self.reader.scroll_mode => {
-                self.reader.step(if self.reader.direction == Direction::Ltr { 1 } else { -1 });
+                self.reader
+                    .step(if self.reader.direction == Direction::Ltr {
+                        1
+                    } else {
+                        -1
+                    });
             }
             Action::Left if !self.reader.scroll_mode => {
-                self.reader.step(if self.reader.direction == Direction::Ltr { -1 } else { 1 });
+                self.reader
+                    .step(if self.reader.direction == Direction::Ltr {
+                        -1
+                    } else {
+                        1
+                    });
             }
             Action::Right | Action::Left => {}
             Action::First => self.reader.goto(0),
@@ -1574,12 +1640,8 @@ impl State {
             Action::PresetWindow => self.apply_view(FitMode::Window, false, None),
             Action::PresetWidth => self.apply_view(FitMode::Width, false, None),
             Action::PresetActual => self.apply_view(FitMode::Actual, false, None),
-            Action::PresetSpreadLtr => {
-                self.apply_view(FitMode::Window, true, Some(Direction::Ltr))
-            }
-            Action::PresetSpreadRtl => {
-                self.apply_view(FitMode::Window, true, Some(Direction::Rtl))
-            }
+            Action::PresetSpreadLtr => self.apply_view(FitMode::Window, true, Some(Direction::Ltr)),
+            Action::PresetSpreadRtl => self.apply_view(FitMode::Window, true, Some(Direction::Rtl)),
             Action::ToggleDir => {
                 self.reader.direction = match self.reader.direction {
                     Direction::Ltr => Direction::Rtl,
@@ -1846,7 +1908,9 @@ impl State {
             self.geometry_dirty = false;
         }
         if let Some(k) = &self.volume_key {
-            self.settings.last_pages.insert(k.clone(), self.reader.index);
+            self.settings
+                .last_pages
+                .insert(k.clone(), self.reader.index);
         }
         // Save geometry + the current maximized flag. `win_geom` already holds the
         // restored rect (it's only updated while normal), so an un-maximize after
@@ -1894,9 +1958,11 @@ impl State {
         let Some(pos) = self.egui_ctx.input(|i| i.pointer.interact_pos()) else {
             return false;
         };
-        self.egui_ctx
-            .layer_id_at(pos)
-            .is_some_and(|l| Self::WHEEL_PASSTHROUGH.iter().any(|&id| l.id == egui::Id::new(id)))
+        self.egui_ctx.layer_id_at(pos).is_some_and(|l| {
+            Self::WHEEL_PASSTHROUGH
+                .iter()
+                .any(|&id| l.id == egui::Id::new(id))
+        })
     }
 
     /// Wheel notches this delta is worth. A mouse's detent is one `LineDelta`; a
@@ -1922,7 +1988,10 @@ impl State {
             if steps == 0 {
                 return;
             }
-            let focal = (self.cursor_x as f32, self.cursor_y as f32 - self.top_inset_px());
+            let focal = (
+                self.cursor_x as f32,
+                self.cursor_y as f32 - self.top_inset_px(),
+            );
             for _ in 0..steps.abs() {
                 self.reader.zoom_to_preset_about(steps > 0, Some(focal));
             }
@@ -1966,7 +2035,10 @@ impl State {
         let now = Instant::now();
         // True once we've been parked at an edge long enough that a further
         // scroll should flip (the hard stop the user has to keep scrolling past).
-        let dwelt = self.reader.pan_edge_at.is_some_and(|t| now.duration_since(t) >= EDGE_DWELL);
+        let dwelt = self
+            .reader
+            .pan_edge_at
+            .is_some_and(|t| now.duration_since(t) >= EDGE_DWELL);
         if next > maxp + 0.5 {
             if cur >= maxp - 0.5 {
                 // Parked at the top: flip to the previous page only after dwelling.
@@ -2070,7 +2142,10 @@ impl State {
                 // Grab-and-throw: release velocity from the recent samples, on the
                 // same rule (and dt floor) as a finger release.
                 let now = Instant::now();
-                let (vx, vy) = self.gestures.samples.velocity(now, self.cursor_x, self.cursor_y);
+                let (vx, vy) = self
+                    .gestures
+                    .samples
+                    .velocity(now, self.cursor_x, self.cursor_y);
                 self.gestures.mark_fling_start(now);
                 if self.reader.scroll_mode {
                     self.reader.start_fling(-vy as f32); // strip velocity = −pointer velocity
@@ -2120,8 +2195,9 @@ impl State {
         };
         // `redraw` is ignored: the desktop event loop's redraw guard already buys a
         // frame for every input event.
-        let resp =
-            self.gestures.on_touch(&mut self.reader, &ctx, phase, id, x, y, Instant::now());
+        let resp = self
+            .gestures
+            .on_touch(&mut self.reader, &ctx, phase, id, x, y, Instant::now());
         for ev in resp.events {
             if let GestureEvent::Tap { x, y } = ev {
                 self.on_tap(x, y);
@@ -2257,7 +2333,11 @@ impl State {
 
         // LRU eviction: keep only the most-recently-seen covers resident.
         const THUMB_CAP: usize = 192;
-        let live = self.library.all_volumes().filter(|v| v.thumb.is_some()).count();
+        let live = self
+            .library
+            .all_volumes()
+            .filter(|v| v.thumb.is_some())
+            .count();
         if live > THUMB_CAP {
             let mut ages: Vec<(u64, usize, usize)> = Vec::new();
             for (si, s) in self.library.series.iter().enumerate() {
@@ -2323,7 +2403,8 @@ impl State {
             self.settings.last_pages.insert(k, self.reader.index);
         }
         let key = path.to_string_lossy().into_owned();
-        self.reader.spread_offset = self.settings.spread_offsets.get(&key).copied().unwrap_or(0) as usize;
+        self.reader.spread_offset =
+            self.settings.spread_offsets.get(&key).copied().unwrap_or(0) as usize;
         // Explicit start (e.g. a specific dropped image) wins; else CLI start
         // index; else the saved position.
         let idx = match start {
@@ -2343,12 +2424,13 @@ impl State {
         };
         self.reader.start_index = 0;
 
-        let pool = DecodePool::new(
+        let pool = DecodePool::new_with_options(
             source.clone(),
             self.gpu.device.clone(),
             self.gpu.queue.clone(),
             self.reader.tex_pool.clone(),
             self.reader.workers,
+            self.reader.decode_options,
         );
         // A fresh pool starts wakerless: hand it the window's frame waker (kept on
         // the reader) or this volume's decodes would land without scheduling the
@@ -2356,6 +2438,10 @@ impl State {
         pool.set_waker(self.reader.waker.clone());
         self.reader.pool = Some(pool);
         self.reader.reset_volume_state();
+        self.reader.cache.clear();
+        self.reader.lq_cache.clear();
+        self.reader.failed.clear();
+        self.reader.last_drawn = None;
         self.info_for = None;
         self.reader.nav_times.clear();
         self.reader.rotation = 0; // each volume opens upright
@@ -2479,7 +2565,9 @@ impl State {
         // fires otherwise. `watch_deadline` mirrors this test for the frame scheduler —
         // keep the two in step.
         let ready = self.watch_dirty.is_some_and(|t| t.elapsed() >= WATCH_QUIET)
-            || self.watch_dirty_since.is_some_and(|t| t.elapsed() >= WATCH_MAX_WAIT);
+            || self
+                .watch_dirty_since
+                .is_some_and(|t| t.elapsed() >= WATCH_MAX_WAIT);
         if ready
             && !self.rescanning
             && self.watcher.is_some()
@@ -2627,6 +2715,11 @@ impl State {
     /// option (or a power re-check that found nothing new) costs nothing.
     fn apply_perf(&mut self) {
         let tier = self.effective_tier();
+        self.reader.set_decode_options(effective_decode_options(
+            self.settings.color_detection,
+            self.settings.perf,
+            self.on_battery,
+        ));
         if tier == self.applied_tier {
             return;
         }
@@ -2728,9 +2821,7 @@ impl State {
         // …unless a `[`/`]` was parked waiting for exactly that listing: replay it now
         // that the cache is warm. If the volume moved folders meanwhile this re-warms
         // and re-parks instead — still terminating, since each pass needs a fresh scan.
-        if sibs_landed
-            && let Some(d) = self.pending_sib_jump.take()
-        {
+        if sibs_landed && let Some(d) = self.pending_sib_jump.take() {
             self.jump_volume(d);
             changed = true;
         }
@@ -2779,23 +2870,10 @@ impl State {
             let mut rows = Vec::new();
             for (n, (index, block)) in blocks.into_iter().enumerate() {
                 if n > 0 {
-                    rows.push((String::new(), String::new())); // spread separator
+                    rows.push((String::new(), Some(String::new()))); // spread separator
                 }
                 rows.extend(block);
-                // LQ preview tier: fill progress + what's on screen for this page
-                // (HQ full-res, the soft LQ thumbnail, or neither yet). Cache reads,
-                // no I/O — which is why this row is added here and not off-thread.
-                let showing = if self.reader.cache.contains(index) {
-                    "HQ"
-                } else if self.reader.lq_cache.contains(index) {
-                    "LQ preview"
-                } else {
-                    "—"
-                };
-                rows.push((
-                    tr().info_lq_tier.to_string(),
-                    format!("{}/{} · {}", self.reader.lq_cache.len(), len, showing),
-                ));
+                rows.extend(self.page_info_live(index, len));
             }
             self.ui.info = rows;
             changed = true;
@@ -2859,7 +2937,11 @@ impl State {
     fn apply_view(&mut self, fit: FitMode, spread: bool, dir: Option<Direction>) {
         self.reader.scroll_mode = false;
         self.reader.fit = fit;
-        self.reader.layout = if spread { Layout::Spread } else { Layout::Single };
+        self.reader.layout = if spread {
+            Layout::Spread
+        } else {
+            Layout::Single
+        };
         if let Some(d) = dir {
             self.reader.direction = d;
         }
@@ -2890,6 +2972,80 @@ impl State {
         self.toast(view_label);
     }
 
+    /// Main-thread values sourced from current caches and view state. Cheap enough
+    /// to rebuild every frame while the info overlay is open.
+    fn page_info_live(&self, index: usize, len: usize) -> Vec<(String, Option<String>)> {
+        let t = tr();
+        // LQ preview tier: fill progress + what's on screen for this page (HQ
+        // full-res, the soft LQ thumbnail, or neither yet).
+        let showing = if self.reader.cache.contains(index) {
+            t.info_hq
+        } else if self.reader.lq_cache.contains(index) {
+            t.info_lq_preview
+        } else {
+            "—"
+        };
+
+        vec![
+            (
+                t.info_lq_tier.to_string(),
+                Some(format!(
+                    "{}/{} · {}",
+                    self.reader.lq_cache.len(),
+                    len,
+                    showing
+                )),
+            ),
+            (
+                t.info_detection.to_string(),
+                Some(self.reader.page_color_detection_label(index)),
+            ),
+        ]
+    }
+
+    /// Refresh decoded/live values without re-reading source bytes.
+    fn refresh_page_info_live(&mut self, visible: (usize, Option<usize>)) {
+        let t = tr();
+        let len = self.reader.source.as_ref().map_or(0, |src| src.len());
+        let pages = [Some(visible.0), visible.1];
+        let live: Vec<_> = pages
+            .into_iter()
+            .flatten()
+            .map(|index| {
+                (
+                    Some(format!(
+                        "{}/{} · {}",
+                        self.reader.lq_cache.len(),
+                        len,
+                        if self.reader.cache.contains(index) {
+                            t.info_hq
+                        } else if self.reader.lq_cache.contains(index) {
+                            t.info_lq_preview
+                        } else {
+                            "—"
+                        }
+                    )),
+                    Some(self.reader.page_color_detection_label(index)),
+                )
+            })
+            .collect();
+        let mut page = 0;
+        for (key, value) in &mut self.ui.info {
+            if key.is_empty() && value.as_deref() == Some("") {
+                page += 1;
+                continue;
+            }
+            let Some((tier, detection)) = live.get(page) else {
+                break;
+            };
+            if key == t.info_lq_tier {
+                value.clone_from(tier);
+            } else if key == t.info_detection {
+                value.clone_from(detection);
+            }
+        }
+    }
+
     /// The in-view anchor page if it is an animated (GIF/WebP) page with its texture
     /// decoded — the page the mini playback controls govern.
     fn anim_anchor(&self) -> Option<usize> {
@@ -2912,7 +3068,11 @@ impl State {
         };
         let frames = self.reader.cache.get(anchor).map_or(1, |t| t.frame_count());
         // GIF/WebP auto-play; `.ico` layers are stepped manually (no play/pause).
-        let is_anim = self.reader.cache.get(anchor).is_some_and(|t| t.is_animation());
+        let is_anim = self
+            .reader
+            .cache
+            .get(anchor)
+            .is_some_and(|t| t.is_animation());
         // Rebind (and reset) when the viewed page changes.
         if self.playback.page != Some(anchor) {
             self.playback.page = Some(anchor);
@@ -2956,7 +3116,10 @@ impl State {
     }
 
     fn playback_frame_count(&self) -> usize {
-        self.playback.page.and_then(|p| self.reader.cache.get(p)).map_or(1, |t| t.frame_count())
+        self.playback
+            .page
+            .and_then(|p| self.reader.cache.get(p))
+            .map_or(1, |t| t.frame_count())
     }
 
     /// Step the animation by `d` frames (pauses playback; wraps around).
@@ -3029,7 +3192,13 @@ impl State {
                 format!("[ {} / {} ] - yosh", anchor + 1, len),
             ),
         };
-        match self.ui.opened.as_ref().and_then(|p| p.file_name()).and_then(|n| n.to_str()) {
+        match self
+            .ui
+            .opened
+            .as_ref()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str())
+        {
             Some(book) => format!("{book} > {file} {pos}"),
             None => format!("{file} {pos}"),
         }
@@ -3050,7 +3219,10 @@ impl State {
         if self.window.fullscreen().is_some() {
             0.0
         } else {
-            self.ui.bar_px.max(0.0).min(self.gpu.config.height as f32 * 0.5)
+            self.ui
+                .bar_px
+                .max(0.0)
+                .min(self.gpu.config.height as f32 * 0.5)
         }
     }
 
@@ -3216,6 +3388,7 @@ impl State {
             },
             self.on_battery,
         );
+        self.ui.color_detection = self.settings.color_detection;
         // Lets the chrome tell "nothing open" (→ onboarding panel) apart from the
         // library grid; `ui.opened` is sticky once set, so it can't.
         self.ui.reader_open = self.reader.source.is_some();
@@ -3235,16 +3408,22 @@ impl State {
                     // else (size, modified, resolution, format, color) needs the
                     // page bytes, so `page_info` gathers it off-thread and
                     // `poll_background` swaps the full rows in when they land.
+                    let len = src.len();
                     let head = |i: usize| {
-                        vec![
-                            (tr().info_file.to_string(), src.name(i).to_string()),
-                            (tr().info_page.to_string(), format!("{} / {}", i + 1, src.len())),
-                        ]
+                        let mut rows = vec![
+                            (tr().info_file.to_string(), Some(src.name(i).to_string())),
+                            (
+                                tr().info_page.to_string(),
+                                Some(format!("{} / {}", i + 1, len)),
+                            ),
+                        ];
+                        rows.extend(self.page_info_live(i, len));
+                        rows
                     };
                     let mut rows = head(a);
                     // Both halves of a spread get described, separated by a blank row.
                     if let Some(b) = b {
-                        rows.push((String::new(), String::new()));
+                        rows.push((String::new(), Some(String::new())));
                         rows.extend(head(b));
                     }
                     self.ui.info = rows;
@@ -3271,8 +3450,13 @@ impl State {
             let (pvx, pvy) = self.reader.pan_velocity;
             (vy, self.reader.scroll_velocity.abs().max(pvx.hypot(pvy)))
         });
+        // Update the resize diagnostic before copying it into decoded/live rows.
         self.reader.update_resize_readout();
-        self.ui.resize_path = self.reader.resize_path_label();
+        // Decoded/live rows belong to each page block. Refresh their values without
+        // re-reading archive bytes every frame.
+        if self.ui.info_open && !self.library_view {
+            self.refresh_page_info_live(visible);
+        }
         // Drain transient messages the reader queued (boundary hit, zoom level)
         // into the shell's timed toast.
         let last_toast = self.reader.pending_toasts.pop();
@@ -3283,7 +3467,9 @@ impl State {
         // Persist the read position: the reader owns `index`, the shell owns the
         // volume key + settings. Cheap per-frame; flushed to disk on exit.
         if let Some(k) = &self.volume_key {
-            self.settings.last_pages.insert(k.clone(), self.reader.index);
+            self.settings
+                .last_pages
+                .insert(k.clone(), self.reader.index);
         }
         // Advance the read-tracking furthest-page mark for the library's read state.
         self.note_progress();
@@ -3301,12 +3487,12 @@ impl State {
         // while the cursor is inside the window.
         let win_w = self.reader.viewport.w.max(1) as f32;
         let edge = win_w * EDGE_FRAC;
-        let in_reader = self.reader.source.is_some() && !self.library_view && !self.reader.scroll_mode;
+        let in_reader =
+            self.reader.source.is_some() && !self.library_view && !self.reader.scroll_mode;
         let below_bar = (self.cursor_y as f32) >= reveal;
         let cx = self.cursor_x as f32;
         self.ui.hover_left = in_reader && self.cursor_in_window && below_bar && cx < edge;
-        self.ui.hover_right =
-            in_reader && self.cursor_in_window && below_bar && cx > win_w - edge;
+        self.ui.hover_right = in_reader && self.cursor_in_window && below_bar && cx > win_w - edge;
         // Bottom seekbar: hidden by default, revealed when the cursor nears the
         // bottom edge (a touch taller than the floating pill so a drag stays in
         // the reveal zone). Cleared here so it vanishes when no volume is open.
@@ -3317,8 +3503,11 @@ impl State {
             let in_cache = self.reader.cache.contains(anchor);
             // A page whose decode errored is in `failed`; treat it as not-loading so
             // we show a failure notice (file name + reason) instead of spinning.
-            let fail_err: Option<String> =
-                if in_cache { None } else { self.reader.failed.get(&anchor).cloned() };
+            let fail_err: Option<String> = if in_cache {
+                None
+            } else {
+                self.reader.failed.get(&anchor).cloned()
+            };
             let failed = fail_err.is_some();
             let loading = !in_cache && !failed;
             if in_cache {
@@ -3376,9 +3565,13 @@ impl State {
             self.ui.seek_rtl = self.reader.direction == Direction::Rtl;
             self.ui.seek_style = ui::SeekbarStyle::Bar;
             self.ui.seek_buffered.clear();
-            self.ui.seek_buffered.extend(self.reader.cache.buffered_indices());
+            self.ui
+                .seek_buffered
+                .extend(self.reader.cache.buffered_indices());
             self.ui.seek_lq_buffered.clear();
-            self.ui.seek_lq_buffered.extend(self.reader.lq_cache.buffered_indices());
+            self.ui
+                .seek_lq_buffered
+                .extend(self.reader.lq_cache.buffered_indices());
             // Window-relative, so measure against the *surface* height, not the
             // page viewport (which is inset by the top bar) — otherwise the reveal
             // zone would sit a bar's height too high.
@@ -3434,9 +3627,8 @@ impl State {
             .collect();
 
         let frame = match self.gpu.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
-                t
-            }
+            wgpu::CurrentSurfaceTexture::Success(t)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.gpu.reconfigure();
                 // On-demand loop: this frame produced nothing — retry, don't stall.
@@ -3656,6 +3848,16 @@ impl State {
             // Re-tiers the live reader in place (no reopen); a no-op if the pick
             // resolves to the tier already running.
             self.apply_perf();
+        }
+        if let Some(mode) = self.ui.req_set_color_detection.take() {
+            self.settings.color_detection = mode;
+            self.reader.set_decode_options(effective_decode_options(
+                mode,
+                self.settings.perf,
+                self.on_battery,
+            ));
+            self.info_for = None;
+            config::save(&self.settings);
             ui_acted = true;
         }
         // Seekbar jump: re-clamp against the live source, skip a redundant goto
@@ -3790,9 +3992,11 @@ impl State {
             self.egui_renderer.free_texture(id);
         }
 
-        self.gpu
-            .queue
-            .submit(user_cmds.into_iter().chain(std::iter::once(encoder.finish())));
+        self.gpu.queue.submit(
+            user_cmds
+                .into_iter()
+                .chain(std::iter::once(encoder.finish())),
+        );
         frame.present();
 
         // Queue/evict library covers *after* presenting, so eviction can never free
@@ -3829,18 +4033,19 @@ impl State {
             // mid-fade, freezing a half-faded ghost (decision must match draw).
             || self.reader.animation_drawn()   // a page-turn frame was drawn
             || drew_live_anim                  // a GIF/WebP is playing
-            || egui_animating                  // egui-driven animation (bar reveal, spinner, …)
+            || egui_animating
+        // egui-driven animation (bar reveal, spinner, …)
         {
             self.window.request_redraw();
         }
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use super::{effective_tier, DeviceTier};
-    use crate::config::PerfPref;
+    use super::{DeviceTier, effective_decode_options, effective_tier};
+    use crate::config::{ColorDetectionPref, PerfPref};
+    use yosh_engine::decode::ColorDetection;
     use yosh_engine::reader::Budget;
 
     /// The load-bearing property of the whole performance setting: the shipped
@@ -3875,6 +4080,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn ml_detection_pauses_for_battery_or_low_profile() {
+        assert_eq!(
+            effective_decode_options(ColorDetectionPref::Ml, PerfPref::Auto, true).color_detection,
+            ColorDetection::Traditional,
+        );
+        assert_eq!(
+            effective_decode_options(ColorDetectionPref::Ml, PerfPref::Low, false).color_detection,
+            ColorDetection::Traditional,
+        );
+        for perf in [PerfPref::Auto, PerfPref::Mid, PerfPref::High] {
+            assert_eq!(
+                effective_decode_options(ColorDetectionPref::Ml, perf, false).color_detection,
+                ColorDetection::Ml,
+                "{perf:?} on AC keeps ML enabled",
+            );
+        }
+        assert_eq!(
+            effective_decode_options(ColorDetectionPref::Off, PerfPref::Low, true).color_detection,
+            ColorDetection::Off,
+        );
+    }
+
     /// A mouse detent is a whole notch and steps the zoom ladder once; a precision
     /// touchpad's Ctrl+two-finger scroll arrives as a stream of fractional notches and
     /// must bank up to whole steps instead of stepping per event.
@@ -3897,12 +4125,19 @@ mod tests {
             total += s;
         }
         assert_eq!(total, 3, "10 x 0.3 notches = 3 whole steps");
-        assert!(bank > 0.0 && bank < 1.0, "leftover fraction is kept: {bank}");
+        assert!(
+            bank > 0.0 && bank < 1.0,
+            "leftover fraction is kept: {bank}"
+        );
 
         // Reversing drops the bank, so a part-notch one way can't be spent the other.
         let mut bank = 0.0;
         assert_eq!(bank_notches(&mut bank, 0.9), 0);
-        assert_eq!(bank_notches(&mut bank, -0.5), 0, "0.9 up must not complete a down step");
+        assert_eq!(
+            bank_notches(&mut bank, -0.5),
+            0,
+            "0.9 up must not complete a down step"
+        );
         assert_eq!(bank, -0.5);
     }
 }

@@ -76,9 +76,21 @@ pub static ES: Strings = Strings {
     info_resolution: "Resolución",
     info_format: "Formato",
     info_color: "Color",
+    info_detection: "Detección",
+    info_detection_not_run: "no ejecutada",
+    info_detection_source_gray: "origen en escala de grises",
+    info_detection_traditional: |state| format!("Tradicional · {state}"),
+    info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · confianza: {confidence} %"),
+    info_detection_unavailable: "OGSOV no disponible (faltan los pesos)",
+    info_detection_transparent: "no ejecutada (imagen transparente)",
+    color_state_color: "color",
+    color_state_grayscale: "escala de grises",
     info_zoom: "Zoom",
     info_resize: "Reescalado",
     info_lq_tier: "Nivel LQ",
+    info_lq_preview: "Vista previa LQ",
+    info_hq: "HQ",
+    info_fling: |vy, glide| format!("al soltar {vy:.0} px/s · deslizamiento {glide:.0} px/s"),
 
     // --- desktop: top bar ---
     open_folder: "Abrir carpeta…",
@@ -178,6 +190,10 @@ pub static ES: Strings = Strings {
     stretch_hint_key: "No: el ajuste nunca supera el 100% nativo (el zoom sí puede) — Z",
     spine_shadow_two_page: "Sombra del lomo (doble página)",
     spine_hint: "Sombreado del centro en dobles páginas no unidas",
+    color_page_detection: "Detección de páginas en color",
+    color_detection_traditional: "Tradicional",
+    color_detection_ml: "ML",
+    color_detection_weights_missing: "Los pesos de OGSOV no están incluidos en esta versión",
     perf_auto_now: |tier, battery| {
         format!("Automático — ahora {tier} ({})", if battery { "con batería" } else { "conectado" })
     },

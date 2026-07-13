@@ -261,9 +261,21 @@ pub struct Strings {
     pub info_resolution: &'static str,
     pub info_format: &'static str,
     pub info_color: &'static str,
+    pub info_detection: &'static str,
+    pub info_detection_not_run: &'static str,
+    pub info_detection_source_gray: &'static str,
+    pub info_detection_traditional: fn(&str) -> String,
+    pub info_detection_ogsov: fn(&str, u8) -> String,
+    pub info_detection_unavailable: &'static str,
+    pub info_detection_transparent: &'static str,
+    pub color_state_color: &'static str,
+    pub color_state_grayscale: &'static str,
     pub info_zoom: &'static str,
     pub info_resize: &'static str,
     pub info_lq_tier: &'static str,
+    pub info_lq_preview: &'static str,
+    pub info_hq: &'static str,
+    pub info_fling: fn(f32, f32) -> String,
 
     // --- desktop: top bar ---
     pub open_folder: &'static str,
@@ -305,6 +317,10 @@ pub struct Strings {
     pub stretch_hint_key: &'static str,
     pub spine_shadow_two_page: &'static str,
     pub spine_hint: &'static str,
+    pub color_page_detection: &'static str,
+    pub color_detection_traditional: &'static str,
+    pub color_detection_ml: &'static str,
+    pub color_detection_weights_missing: &'static str,
     /// What `Auto` resolves to right now: tier name, and whether on battery.
     pub perf_auto_now: fn(&str, bool) -> String,
 

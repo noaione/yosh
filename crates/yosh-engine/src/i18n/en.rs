@@ -72,9 +72,21 @@ pub static EN: Strings = Strings {
     info_resolution: "Resolution",
     info_format: "Format",
     info_color: "Color",
+    info_detection: "Detection",
+    info_detection_not_run: "not run",
+    info_detection_source_gray: "source grayscale",
+    info_detection_traditional: |state| format!("Traditional · {state}"),
+    info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · confidence: {confidence}%"),
+    info_detection_unavailable: "OGSOV unavailable (weights missing)",
+    info_detection_transparent: "not run (transparent image)",
+    color_state_color: "color",
+    color_state_grayscale: "grayscale",
     info_zoom: "Zoom",
     info_resize: "Resize",
     info_lq_tier: "LQ tier",
+    info_lq_preview: "LQ preview",
+    info_hq: "HQ",
+    info_fling: |vy, glide| format!("release {vy:.0} px/s · glide {glide:.0} px/s"),
 
     // --- desktop: top bar ---
     open_folder: "Open folder…",
@@ -174,6 +186,10 @@ pub static EN: Strings = Strings {
     stretch_hint_key: "Off: fit never scales past 100% native (zoom still can) — Z",
     spine_shadow_two_page: "Spine shadow (two-page)",
     spine_hint: "Book-gutter shading on un-joined spreads",
+    color_page_detection: "Color-page detection",
+    color_detection_traditional: "Traditional",
+    color_detection_ml: "ML",
+    color_detection_weights_missing: "OGSOV weights not embedded in this build",
     perf_auto_now: |tier, battery| {
         format!("Auto — currently {tier} ({})", if battery { "on battery" } else { "plugged in" })
     },

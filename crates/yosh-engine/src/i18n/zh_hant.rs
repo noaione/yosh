@@ -76,9 +76,21 @@ pub static ZH_HANT: Strings = Strings {
     info_resolution: "解析度",
     info_format: "格式",
     info_color: "色彩",
+    info_detection: "偵測",
+    info_detection_not_run: "未執行",
+    info_detection_source_gray: "來源為灰階",
+    info_detection_traditional: |state| format!("傳統 · {state}"),
+    info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · 信心度: {confidence}%"),
+    info_detection_unavailable: "OGSOV 無法使用（缺少權重）",
+    info_detection_transparent: "未執行（透明圖片）",
+    color_state_color: "彩色",
+    color_state_grayscale: "灰階",
     info_zoom: "縮放",
     info_resize: "重新取樣",
     info_lq_tier: "LQ 預覽",
+    info_lq_preview: "LQ 預覽",
+    info_hq: "HQ",
+    info_fling: |vy, glide| format!("放開時 {vy:.0} px/s · 慣性滑動 {glide:.0} px/s"),
 
     // --- desktop: top bar ---
     open_folder: "開啟資料夾…",
@@ -178,6 +190,10 @@ pub static ZH_HANT: Strings = Strings {
     stretch_hint_key: "關: 符合時不超過原始 100%（仍可縮放）— Z",
     spine_shadow_two_page: "書背陰影（雙頁）",
     spine_hint: "在未合併的雙頁中縫加上陰影",
+    color_page_detection: "彩色頁面偵測",
+    color_detection_traditional: "傳統",
+    color_detection_ml: "ML",
+    color_detection_weights_missing: "此版本未嵌入 OGSOV 權重",
     perf_auto_now: |tier, battery| {
         format!("自動 — 目前為{tier}（{}）", if battery { "使用電池" } else { "已接上電源" })
     },

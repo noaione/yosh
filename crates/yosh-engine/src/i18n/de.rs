@@ -76,9 +76,21 @@ pub static DE: Strings = Strings {
     info_resolution: "Auflösung",
     info_format: "Format",
     info_color: "Farbe",
+    info_detection: "Erkennung",
+    info_detection_not_run: "nicht ausgeführt",
+    info_detection_source_gray: "Quelle in Graustufen",
+    info_detection_traditional: |state| format!("Traditionell · {state}"),
+    info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · Sicherheit: {confidence} %"),
+    info_detection_unavailable: "OGSOV nicht verfügbar (Gewichte fehlen)",
+    info_detection_transparent: "nicht ausgeführt (transparentes Bild)",
+    color_state_color: "Farbe",
+    color_state_grayscale: "Graustufen",
     info_zoom: "Zoom",
     info_resize: "Skalierung",
     info_lq_tier: "LQ-Stufe",
+    info_lq_preview: "LQ-Vorschau",
+    info_hq: "HQ",
+    info_fling: |vy, glide| format!("beim Loslassen {vy:.0} px/s · Gleiten {glide:.0} px/s"),
 
     // --- desktop: top bar ---
     open_folder: "Ordner öffnen…",
@@ -178,6 +190,10 @@ pub static DE: Strings = Strings {
     stretch_hint_key: "Aus: Einpassen geht nie über 100 % nativ (Zoom schon) — Z",
     spine_shadow_two_page: "Bundschatten (Doppelseite)",
     spine_hint: "Schattierung des Bunds bei nicht verbundenen Doppelseiten",
+    color_page_detection: "Farberkennung",
+    color_detection_traditional: "Traditionell",
+    color_detection_ml: "ML",
+    color_detection_weights_missing: "OGSOV-Gewichte sind in diesem Build nicht enthalten",
     perf_auto_now: |tier, battery| {
         format!("Auto — derzeit {tier} ({})", if battery { "im Akkubetrieb" } else { "am Netz" })
     },
