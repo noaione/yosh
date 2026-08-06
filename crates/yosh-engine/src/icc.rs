@@ -39,16 +39,10 @@ pub fn is_gray(profile: &[u8]) -> bool {
     profile.get(16..20) == Some(b"GRAY")
 }
 
-/// True if the profile's data colour space is CMYK (at ICC header offset 16) —
-/// e.g. the SWOP/FOGRA profile a print-sourced CMYK JPEG or TIFF carries.
-///
-/// Like [`is_gray`], such a profile must NOT reach `to_srgb_rgba`, and this one
-/// fails *silently*: qcms accepts an `(RGBA8, RGBA8)` transform, so it does not
-/// reject the mismatch — it runs the 4-channel CMYK source through a 3-channel
-/// `Clut4x3`, leaving the LUT partly unfilled and rendering garbage/near-black.
-/// The pixels have already been converted to RGB by the decoder (zune-jpeg for
-/// CMYK JPEGs, the `image` crate for CMYK TIFFs), so the profile no longer
-/// describes them and the right move is to skip color management here.
+/// True if the profile's data colour space is CMYK (`CMYK`, at ICC header
+/// offset 16) — a printer/output profile describing device CMYK. Such a profile
+/// must NOT be fed to `to_srgb_rgba` (RGBA data against a CMYK profile is
+/// nonsense); it is the only valid source for `cmyk_to_srgb_rgb8`.
 pub fn is_cmyk(profile: &[u8]) -> bool {
     profile.get(16..20) == Some(b"CMYK")
 }
@@ -126,4 +120,44 @@ pub fn to_srgb_rgba(profile: &[u8], rgba: &mut [u8]) {
         return;
     };
     xfm.apply(rgba);
+}
+
+/// Fallible CMYK8 → sRGB RGB8 conversion via qcms. `cmyk` holds conventional
+/// CMYK samples (0 = no ink, 255 = full ink) and `rgb` receives the converted
+/// pixels. Returns a descriptive error when the profile can't be parsed, qcms
+/// can't build a transform (e.g. a CMYK profile without a usable A2B table), or
+/// the buffer lengths are inconsistent — the caller falls back to a generic
+/// conversion. Lengths are validated before conversion because qcms's
+/// `Transform::convert` panics on mismatched buffers.
+pub fn cmyk_to_srgb_rgb8(profile: &[u8], cmyk: &[u8], rgb: &mut [u8]) -> Result<(), String> {
+    let n = cmyk.len() / 4;
+    if cmyk.len() % 4 != 0 {
+        return Err(format!(
+            "cmyk icc: incomplete CMYK pixels ({} bytes)",
+            cmyk.len()
+        ));
+    }
+    if rgb.len() != n * 3 {
+        return Err(format!(
+            "cmyk icc: destination {} bytes for {n} CMYK pixels (need {})",
+            rgb.len(),
+            n * 3
+        ));
+    }
+    let Some(input) = qcms::Profile::new_from_slice(profile, false) else {
+        return Err("cmyk icc: unparsable profile".into());
+    };
+    let mut output = qcms::Profile::new_sRGB();
+    output.precache_output_transform();
+    let Some(xfm) = qcms::Transform::new_to(
+        &input,
+        &output,
+        qcms::DataType::CMYK,
+        qcms::DataType::RGB8,
+        qcms::Intent::Perceptual,
+    ) else {
+        return Err("cmyk icc: unsupported profile (no usable A2B table)".into());
+    };
+    xfm.convert(cmyk, rgb);
+    Ok(())
 }

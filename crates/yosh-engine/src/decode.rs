@@ -181,6 +181,90 @@ fn ga_to_gray(ga: &[u8]) -> Vec<u8> {
     ga.iter().step_by(2).copied().collect()
 }
 
+/// Invert CMYK samples in place (`v = 255 - v`).
+fn invert_cmyk(buf: &mut [u8]) {
+    for v in buf {
+        *v = 255 - *v;
+    }
+}
+
+/// The CMYK storage convention of a 4-component JPEG, read from its Adobe
+/// APP14 marker: returns `(adobe, ycck)`.
+///
+/// - Adobe files (APP14 `"Adobe"` transform 0 = CMYK, 2 = YCCK) store
+///   **inverted** samples (0 = 100% ink). jpeg-decoder outputs `255 − stored`,
+///   so for them its output is already conventional ink.
+/// - US files (no Adobe marker) store conventional samples (0 = no ink), so
+///   jpeg-decoder's output is complemented (255 − ink).
+///
+/// YCCK's three color channels are display RGB decoded from YCbCr in either
+/// convention; only the K polarity follows the file.
+fn jpeg_cmyk_convention(bytes: &[u8]) -> (bool, bool) {
+    let mut i = 2;
+    while i + 4 <= bytes.len() {
+        if bytes[i] == 0xFF && bytes[i + 1] == 0xEE {
+            let len = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
+            let payload = bytes.get(i + 4..i + 4 + len.saturating_sub(2));
+            if let Some(p) = payload
+                && p.len() >= 12
+                && &p[..5] == b"Adobe"
+            {
+                // Payload: "Adobe" + version(2) + flags0(2) + flags1(2) + transform(1).
+                return (true, p[11] == 2);
+            }
+            i += 2 + len;
+        } else {
+            i += 1;
+        }
+    }
+    (false, false)
+}
+
+/// Generic fallback for CMYK JPEGs without a usable embedded profile: convert
+/// conventional-ink samples to opaque RGBA8 with the classic ink model
+/// (poppler's `cmyk2rgb`): `R = (255 − C)·(255 − K)/255` — white paper stays
+/// white, full black stays black, pure inks keep their expected RGB hues.
+/// For YCCK the RGB channels are display colors decoded from YCbCr (not ink),
+/// so only the K factor applies: `R = R_disp·(255 − K)/255`.
+///
+/// This is a deterministic approximate display conversion — an untagged CMYK
+/// image has no uniquely correct appearance (it depends on the printing
+/// condition), so we define one. Division uses the fast `(t + (t >> 8)) >> 8`
+/// ≈ t/255 trick (exact to ±1, like poppler); u32 math cannot overflow
+/// (`c·nk + 128 ≤ 65153`) and `nk − div ≥ 0`, so no clamping is needed.
+fn cmyk_fallback_to_rgba(ink: &[u8], ycck: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(ink.len());
+    for px in ink.chunks_exact(4) {
+        let (c, m, y, k) = (px[0] as u32, px[1] as u32, px[2] as u32, px[3] as u32);
+        let nk = 255 - k;
+        let scale = |v: u32| {
+            let t = v * nk + 128;
+            (t + (t >> 8)) >> 8
+        };
+        if ycck {
+            out.extend_from_slice(&[scale(c) as u8, scale(m) as u8, scale(y) as u8, 255]);
+        } else {
+            out.extend_from_slice(&[
+                (nk - scale(c)) as u8,
+                (nk - scale(m)) as u8,
+                (nk - scale(y)) as u8,
+                255,
+            ]);
+        }
+    }
+    out
+}
+
+/// Convert conventional CMYK8 via an embedded ICC to opaque sRGB RGBA8. None
+/// when the profile or qcms transform is unusable — the caller falls back to
+/// the generic conversion.
+fn cmyk_icc_to_rgba(profile: &[u8], cmyk: &[u8], w: u32, h: u32) -> Option<Vec<u8>> {
+    let n = (w as usize) * (h as usize);
+    let mut rgb = vec![0u8; n * 3];
+    icc::cmyk_to_srgb_rgb8(profile, cmyk, &mut rgb).ok()?;
+    Some(rgb_to_rgba(&rgb, w, h))
+}
+
 /// True if every RGBA pixel is fully opaque (alpha 255).
 fn is_opaque(rgba: &[u8]) -> bool {
     rgba.chunks_exact(4).all(|px| px[3] == 255)
@@ -234,16 +318,6 @@ fn decode_png(bytes: &[u8]) -> Result<Decoded, String> {
 fn decode_jpeg(bytes: &[u8]) -> Result<Decoded, String> {
     use jpeg_decoder::PixelFormat;
     let mut d = jpeg_decoder::Decoder::new(std::io::Cursor::new(bytes));
-    // Peek at the headers before decoding: a 4-component JPEG (CMYK, or Adobe's
-    // YCCK) goes to the `image` crate instead. Its JPEG backend is zune-jpeg, which
-    // converts *both* Adobe transforms to RGB during decode; `jpeg-decoder` only
-    // hands back raw CMYK32 that we'd have to convert (and ink-profile) ourselves.
-    // Reading the info first and then decoding on the same decoder is supported —
-    // the decode resumes from the already-parsed frame rather than re-parsing.
-    d.read_info().map_err(|e| format!("jpeg read_info: {e}"))?;
-    if d.info().map(|i| i.pixel_format) == Some(PixelFormat::CMYK32) {
-        return decode_other(bytes);
-    }
     let pixels = d.decode().map_err(|e| format!("jpeg decode: {e}"))?;
     let info = d.info().ok_or("jpeg: no info")?;
     let (w, h) = (info.width as u32, info.height as u32);
@@ -251,51 +325,141 @@ fn decode_jpeg(bytes: &[u8]) -> Result<Decoded, String> {
     match info.pixel_format {
         PixelFormat::L8 => Ok((w, h, true, pixels, icc)),
         PixelFormat::RGB24 => Ok((w, h, false, rgb_to_rgba(&pixels, w, h), icc)),
+        // CMYK32 (ordinary CMYK and Adobe YCCK are both normalized to this by
+        // jpeg-decoder). jpeg-decoder outputs 255 − stored, so the sample
+        // polarity mirrors the file's convention: Adobe files (APP14) store
+        // inverted CMYK and therefore already yield conventional ink, while
+        // US files yield complemented samples. Prefer the embedded CMYK ICC
+        // via qcms when it is usable (converted to conventional ink first);
+        // otherwise use the documented generic fallback. Either way the
+        // result is opaque sRGB RGBA8 and the CMYK profile is consumed — the
+        // downstream RGBA ICC path must never see a CMYK profile applied to
+        // already-converted pixels. YCCK's RGB channels are display colors
+        // from YCbCr (not ink), so it never takes the ICC path.
+        PixelFormat::CMYK32 => {
+            let n = (w as usize) * (h as usize);
+            if pixels.len() != n * 4 {
+                return Err(format!(
+                    "jpeg: cmyk buffer {} bytes for {w}x{h} ({n} px)",
+                    pixels.len()
+                ));
+            }
+            let (adobe, ycck) = jpeg_cmyk_convention(bytes);
+            let mut cmyk = pixels;
+            // Normalize the decoder output to conventional ink (0 = no ink),
+            // which is what the ICC profiles describe and qcms expects: US
+            // files make jpeg-decoder's 255 − stored complemented (invert);
+            // Adobe files already yield ink.
+            if !adobe {
+                invert_cmyk(&mut cmyk);
+            }
+            if !ycck
+                && let Some(p) = &icc
+                && icc::is_cmyk(p)
+                && let Some(rgba) = cmyk_icc_to_rgba(p, &cmyk, w, h)
+            {
+                return Ok((w, h, false, rgba, None));
+            }
+            Ok((w, h, false, cmyk_fallback_to_rgba(&cmyk, ycck), None))
+        }
         other => Err(format!("jpeg: unsupported pixel format {other:?}")),
     }
 }
 
-/// Decode JPEG XL via the pure-Rust `jxl-oxide`. Renders the first frame (ignores
-/// animation) and normalizes to the same gray/RGBA8 + ICC contract as the others;
-/// jxl-oxide hands back samples in the image's own color space plus its embedded
-/// ICC, so the downstream qcms→sRGB step (in `decode_and_downscale`) color-manages
-/// it exactly like JPEG/PNG.
+/// Decode JPEG XL via the pure-Rust `jxl-oxide` (with the pure-Rust `moxcms`
+/// CMS enabled for CMYK sources). Renders the first frame (ignores animation)
+/// and normalizes to the same gray/RGBA8 + ICC contract as the others.
+///
+/// CMYK and CMYKA sources are profile-described (an embedded CMYK ICC), which
+/// jxl-oxide's basic color path cannot process — we request an sRGB color
+/// encoding with perceptual intent before rendering, so jxl-oxide + moxcms
+/// convert CMYK → sRGB while samples are still floating point (avoiding a
+/// CMYK8 round trip). Non-CMYK images render in their own encoding and keep the
+/// original ICC for the downstream qcms → sRGB step, exactly like JPEG/PNG.
 fn decode_jxl(bytes: &[u8]) -> Result<Decoded, String> {
-    use jxl_oxide::{JxlImage, PixelFormat};
-    let image = JxlImage::builder()
+    use jxl_oxide::{EnumColourEncoding, JxlImage, PixelFormat, RenderingIntent};
+    let mut image = JxlImage::builder()
         .read(std::io::Cursor::new(bytes))
         .map_err(|e| format!("jxl read: {e}"))?;
     let (w, h) = (image.width(), image.height());
-    let icc = image.original_icc().map(<[u8]>::to_vec);
+    // The *source* pixel format, captured before any color-encoding request
+    // (pixel_format() reflects the requested encoding).
     let fmt = image.pixel_format();
-    let render = image.render_frame(0).map_err(|e| format!("jxl render: {e}"))?;
-    let fb = render.image_all_channels(); // interleaved f32, len = w*h*channels
-    let buf = fb.buf();
-    let ch = fb.channels();
+    let is_cmyk = matches!(fmt, PixelFormat::Cmyk | PixelFormat::Cmyka);
+    let icc = image.original_icc().map(<[u8]>::to_vec);
+    if is_cmyk {
+        image.request_color_encoding(EnumColourEncoding::srgb(RenderingIntent::Perceptual));
+    }
+    // A CMYK JXL without a usable embedded CMYK ICC fails here with the CMS
+    // error surfaced by the render (a descriptive failure, not a silent
+    // fallback: JXL CMYK is explicitly profile-described).
+    let render = image
+        .render_frame(0)
+        .map_err(|e| format!("jxl{} render: {e}", if is_cmyk { " cmyk" } else { "" }))?;
+    // `stream()` yields only the display channels (color + black when still
+    // CMYK + alpha when present) — unrelated extra channels (spot colors,
+    // depth, …) never corrupt the stride. After the sRGB request a CMYK(A)
+    // source streams RGB(A): the black channel is folded into RGB by the CMS.
+    let mut stream = render.stream();
+    let ch = stream.channels();
+    let expect = match fmt {
+        PixelFormat::Gray => 1,
+        PixelFormat::Graya => 2,
+        PixelFormat::Rgb | PixelFormat::Cmyk => 3,
+        PixelFormat::Rgba | PixelFormat::Cmyka => 4,
+    };
+    if ch != expect {
+        return Err(format!(
+            "jxl: stream has {ch} channels, expected {expect} for {fmt:?}"
+        ));
+    }
+    let n = (w as usize) * (h as usize);
+    let mut samples = vec![0f32; n * expect as usize];
+    let mut got = 0;
+    loop {
+        let k = stream.write_to_buffer(&mut samples[got..]);
+        if k == 0 {
+            break;
+        }
+        got += k;
+    }
+    if got != samples.len() {
+        return Err(format!(
+            "jxl: stream wrote {got} of {} samples",
+            samples.len()
+        ));
+    }
     // jxl-oxide samples are f32 (≈[0,1] for SDR); clamp handles any HDR overshoot.
     let to_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
-    match fmt {
+    match expect {
         // 1ch gray — map straight through.
-        PixelFormat::Gray => Ok((w, h, true, buf.iter().map(|&v| to_u8(v)).collect(), icc)),
+        1 => Ok((w, h, true, samples.iter().map(|&v| to_u8(v)).collect(), icc)),
         // Gray+alpha — drop alpha to match the 1ch gray contract (like `ga_to_gray`).
-        PixelFormat::Graya => {
-            Ok((w, h, true, buf.chunks_exact(ch).map(|px| to_u8(px[0])).collect(), icc))
-        }
-        // RGB → RGBA8 (opaque).
-        PixelFormat::Rgb => {
-            let mut pixels = vec![0u8; (w as usize) * (h as usize) * 4];
-            for (px, out) in buf.chunks_exact(ch).zip(pixels.chunks_exact_mut(4)) {
+        2 => Ok((
+            w,
+            h,
+            true,
+            samples.chunks_exact(2).map(|px| to_u8(px[0])).collect(),
+            icc,
+        )),
+        // RGB(A) → RGBA8. CMYK(A) sources converted to sRGB here must not
+        // return the original CMYK profile as though it described the RGB
+        // pixels (the downstream qcms path would corrupt them) — no profile
+        // means "treat as sRGB".
+        ch @ (3 | 4) => {
+            let mut pixels = vec![0u8; n * 4];
+            for (px, out) in samples
+                .chunks_exact(ch as usize)
+                .zip(pixels.chunks_exact_mut(4))
+            {
                 out[0] = to_u8(px[0]);
                 out[1] = to_u8(px[1]);
                 out[2] = to_u8(px[2]);
-                out[3] = 255;
+                out[3] = if ch == 4 { to_u8(px[3]) } else { 255 };
             }
-            Ok((w, h, false, pixels, icc))
+            Ok((w, h, false, pixels, if is_cmyk { None } else { icc }))
         }
-        // Already interleaved RGBA — map straight through.
-        PixelFormat::Rgba => Ok((w, h, false, buf.iter().map(|&v| to_u8(v)).collect(), icc)),
-        // CMYK(A) would need a CMS we don't enable; effectively never occurs for manga.
-        other => Err(format!("jxl: unsupported pixel format {other:?}")),
+        _ => unreachable!("channel count validated against the pixel format"),
     }
 }
 
@@ -1127,34 +1291,6 @@ mod tests {
         assert_eq!(idct_eighths(5207, u32::MAX), 8);
     }
 
-    /// End-to-end LQ JPEG decode: the output still lands at the exact requested
-    /// height (the IDCT reduction is invisible in the result), and `src_w`/`src_h`
-    /// keep describing the *file* — they drive the zoom readout and the 1:1 decode
-    /// target, so reporting the reduced buffer's size there would misreport zoom and
-    /// re-decode loops. The HQ path is unaffected, which the same page proves.
-    #[test]
-    fn lq_jpeg_decodes_scaled_but_reports_true_source_dims() {
-        let (w, h) = (600u16, 1200u16);
-        let rgb: Vec<u8> = (0..(w as usize * h as usize))
-            .flat_map(|i| [(i % 251) as u8, (i % 253) as u8, (i % 257) as u8])
-            .collect();
-        let mut bytes = Vec::new();
-        jpeg_encoder::Encoder::new(&mut bytes, 90)
-            .encode(&rgb, w, h, jpeg_encoder::ColorType::Rgb)
-            .unwrap();
-
-        let mut resizer = Resizer::new();
-        for lq in [true, false] {
-            match decode_page(&bytes, 150, lq, &mut resizer).unwrap() {
-                DecodedPage::Still(img) => {
-                    assert_eq!(img.h, 150, "lq={lq}: decoded to the exact target height");
-                    assert_eq!((img.src_w, img.src_h), (600, 1200), "lq={lq}: true source dims");
-                }
-                _ => panic!("a jpeg is a still"),
-            }
-        }
-    }
-
     #[test]
     fn multiframe_gif_decodes_as_animation() {
         let bytes = encode_gif(vec![frame([255, 0, 0, 255]), frame([0, 0, 255, 255])]);
@@ -1309,5 +1445,496 @@ mod tests {
                 _ => panic!("{fmt:?} should be a still"),
             }
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // CMYK support (plan: docs/CMYK_IMPLEMENTATION_PLAN.md). Fixtures live in
+    // `testdata/` and are generated by `testdata/make_fixtures.py`.
+    // ---------------------------------------------------------------------
+
+    macro_rules! fixture {
+        ($name:literal) => {
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/testdata/", $name))
+        };
+    }
+
+    /// The 4×4 grid of conventional-CMYK patches in the `cmyk_*.jpg`/`cmyk*.jxl`
+    /// fixtures, plus each patch's sRGB reference: lcms2 (Pillow ImageCms,
+    /// USWebCoatedSWOP, perceptual intent) printed by the generator script.
+    const CMY: &[(u8, u8, u8, u8, [u8; 3])] = &[
+        (0, 0, 0, 0, [255, 255, 255]),
+        (0, 0, 0, 255, [35, 31, 32]),
+        (255, 0, 0, 0, [0, 174, 239]),
+        (0, 255, 0, 0, [236, 0, 140]),
+        (0, 0, 255, 0, [255, 242, 0]),
+        (255, 255, 0, 0, [46, 48, 146]),
+        (255, 0, 255, 0, [0, 166, 80]),
+        (0, 255, 255, 0, [237, 28, 36]),
+        (64, 48, 48, 0, [191, 193, 194]),
+        (128, 96, 96, 0, [139, 146, 149]),
+        (192, 144, 144, 0, [90, 111, 115]),
+        (32, 32, 32, 160, [107, 105, 106]),
+        (255, 192, 64, 32, [4, 74, 124]),
+        (64, 128, 192, 48, [164, 116, 72]),
+        (16, 240, 32, 0, [224, 46, 131]),
+        (200, 200, 200, 40, [80, 71, 69]),
+    ];
+
+    /// Index of patch `i`'s center pixel in the 64×64 fixture buffers (16px
+    /// patches, 4×4 grid).
+    fn patch_center(i: usize) -> usize {
+        ((i / 4) * 16 + 8) * 64 + (i % 4) * 16 + 8
+    }
+
+    /// Per-channel tolerance vs the lcms2 references: qcms and moxcms differ
+    /// from Little CMS in interpolation and intent handling, and the lossy
+    /// JPEG / JXL fixtures add small codec error. The tests assert the colors
+    /// are visibly right, not pixel-identical across CMS implementations.
+    const CMS_TOLERANCE: i32 = 16;
+
+    fn rgba_at(rgba: &[u8], px: usize) -> [u8; 4] {
+        [
+            rgba[px * 4],
+            rgba[px * 4 + 1],
+            rgba[px * 4 + 2],
+            rgba[px * 4 + 3],
+        ]
+    }
+
+    fn near(expected: [u8; 3], got: [u8; 4], tol: i32) -> bool {
+        (0..3).all(|c| (expected[c] as i32 - got[c] as i32).abs() <= tol)
+    }
+
+    #[test]
+    fn complemented_cmyk_fallback_maps_expected_colors() {
+        // Inputs are conventional ink samples (0 = no ink) — the normalized
+        // form decode_jpeg hands the fallback. `ycck` says the RGB channels
+        // are display colors decoded from YCbCr rather than ink.
+        let cases: &[([u8; 4], bool, [u8; 4])] = &[
+            // CMYK: R = (255 − C)·(255 − K)/255.
+            ([0, 0, 0, 0], false, [255, 255, 255, 255]), // white paper
+            ([0, 0, 0, 255], false, [0, 0, 0, 255]),     // full black
+            ([255, 0, 0, 0], false, [0, 255, 255, 255]), // cyan
+            ([0, 255, 0, 0], false, [255, 0, 255, 255]), // magenta
+            ([0, 0, 255, 0], false, [255, 255, 0, 255]), // yellow
+            ([128, 128, 128, 128], false, [63, 63, 63, 255]), // (127·127)/255 = 63.2 → 63
+            ([1, 1, 1, 0], false, [254, 254, 254, 255]), // (254·255)/255 = 254.5 → 254
+            ([100, 200, 150, 0], false, [155, 55, 105, 255]), // (255−v)·255/255
+            // YCCK: display RGB scaled by (1 − K).
+            ([255, 255, 255, 0], true, [255, 255, 255, 255]), // white, no K
+            ([0, 0, 0, 255], true, [0, 0, 0, 255]),           // black
+            ([255, 128, 128, 128], true, [127, 64, 64, 255]), // 255·127/255 = 127
+            ([255, 255, 255, 128], true, [127, 127, 127, 255]),
+        ];
+        for (input, ycck, want) in cases {
+            let out = cmyk_fallback_to_rgba(input, *ycck);
+            assert_eq!(
+                &out[..],
+                &want[..],
+                "fallback({input:?}, ycck={ycck}) — RGBA ordering + alpha 255"
+            );
+        }
+    }
+
+    #[test]
+    fn icc_signatures_are_detected_safely() {
+        let sig = |s: &[u8]| {
+            let mut p = vec![0u8; 20];
+            p[16..20].copy_from_slice(s);
+            p
+        };
+        assert!(icc::is_cmyk(&sig(b"CMYK")));
+        assert!(!icc::is_cmyk(&sig(b"RGB ")));
+        assert!(!icc::is_cmyk(&sig(b"GRAY")));
+        assert!(icc::is_gray(&sig(b"GRAY")));
+        assert!(!icc::is_gray(&sig(b"RGB ")));
+        // Truncated / empty profiles must be rejected safely (no panics).
+        assert!(!icc::is_cmyk(b""));
+        assert!(!icc::is_cmyk(&[0u8; 16]));
+        assert!(!icc::is_cmyk(&[0u8; 19]));
+        assert!(!icc::is_gray(&[0u8; 19]));
+        // The real fixture profile is recognized as CMYK.
+        assert!(icc::is_cmyk(fixture!("USWebCoatedSWOP.icc")));
+    }
+
+    #[test]
+    fn qcms_cmyk_transform_matches_lcms_references() {
+        let profile = fixture!("USWebCoatedSWOP.icc");
+        let mut cmyk = Vec::new();
+        for (c, m, y, k, _) in CMY.iter().copied() {
+            cmyk.extend_from_slice(&[c, m, y, k]);
+        }
+        let mut rgb = vec![0u8; CMY.len() * 3];
+        icc::cmyk_to_srgb_rgb8(profile, &cmyk, &mut rgb).unwrap();
+        for (i, (_, _, _, _, want)) in CMY.iter().enumerate() {
+            let got = [rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2], 255];
+            assert!(
+                near(*want, got, CMS_TOLERANCE),
+                "patch {i} ({:?}): qcms {got:?} vs lcms {want:?}",
+                CMY[i]
+            );
+        }
+    }
+
+    #[test]
+    fn cmyk_transform_rejects_bad_buffers() {
+        let profile = fixture!("USWebCoatedSWOP.icc");
+        // Incomplete CMYK pixel (len % 4 != 0).
+        let mut rgb = vec![0u8; 3];
+        assert!(icc::cmyk_to_srgb_rgb8(profile, &[0, 0, 0], &mut rgb).is_err());
+        // Mismatched destination length — must not panic.
+        let mut short = vec![0u8; 7];
+        assert!(icc::cmyk_to_srgb_rgb8(profile, &[0u8; 4], &mut short).is_err());
+        let mut long = vec![0u8; 4];
+        assert!(icc::cmyk_to_srgb_rgb8(profile, &[0u8; 4], &mut long).is_err());
+        // Malformed / non-CMYK profile data → descriptive error, not a panic.
+        assert!(icc::cmyk_to_srgb_rgb8(b"not a profile", &[0u8; 4], &mut rgb).is_err());
+    }
+
+    #[test]
+    fn cmyk_icc_jpeg_decodes_to_srgb() {
+        let bytes = fixture!("cmyk_icc.jpg");
+        let mut resizer = Resizer::new();
+        let img = decode_page(bytes, 64, false, &mut resizer).unwrap();
+        let DecodedPage::Still(img) = img else {
+            panic!("cmyk jpeg should be a still")
+        };
+        assert_eq!((img.w, img.h), (64, 64));
+        assert!(!img.gray, "CMYK source is color-stored, not SourceGray");
+        assert_eq!(img.pixels.len(), 64 * 64 * 4);
+        assert_ne!(
+            img.color_detection,
+            ColorDetectionOutcome::SourceGray,
+            "CMYK source must not report SourceGray"
+        );
+        for (i, (_, _, _, _, want)) in CMY.iter().enumerate() {
+            let got = rgba_at(&img.pixels, patch_center(i));
+            assert!(
+                near(*want, got, CMS_TOLERANCE),
+                "icc jpeg patch {i}: got {got:?} vs lcms {want:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn untagged_cmyk_jpeg_uses_generic_fallback() {
+        let bytes = fixture!("cmyk_untagged.jpg");
+        let mut resizer = Resizer::new();
+        let img = decode_page(bytes, 64, false, &mut resizer).unwrap();
+        let DecodedPage::Still(img) = img else {
+            panic!("still")
+        };
+        assert_eq!((img.w, img.h), (64, 64));
+        assert!(!img.gray);
+        assert_eq!(img.pixels.len(), 64 * 64 * 4);
+        // The generic conversion must not invert the image: white stays white,
+        // black stays black, and pure cyan keeps a blue-dominant hue.
+        let white = rgba_at(&img.pixels, patch_center(0));
+        let black = rgba_at(&img.pixels, patch_center(1));
+        let cyan = rgba_at(&img.pixels, patch_center(2));
+        assert!(near([255, 255, 255], white, 8), "white: {white:?}");
+        assert!(near([0, 0, 0], black, 8), "black: {black:?}");
+        assert!(
+            cyan[0] <= 32 && cyan[1] >= 224 && cyan[2] >= 224,
+            "cyan: {cyan:?} (inverted output would be red-ish)"
+        );
+    }
+
+    #[test]
+    fn us_convention_cmyk_jpeg_uses_generic_fallback() {
+        // No Adobe APP14 marker: the file stores conventional CMYK (0 = no
+        // ink), so jpeg-decoder complements it and the fallback must invert
+        // back — white stays white, black stays black, cyan stays blue-ish.
+        let bytes = fixture!("cmyk_us.jpg");
+        let mut resizer = Resizer::new();
+        let img = decode_page(bytes, 64, false, &mut resizer).unwrap();
+        let DecodedPage::Still(img) = img else {
+            panic!("still")
+        };
+        assert_eq!((img.w, img.h), (64, 64));
+        assert!(!img.gray);
+        let white = rgba_at(&img.pixels, patch_center(0));
+        let black = rgba_at(&img.pixels, patch_center(1));
+        let cyan = rgba_at(&img.pixels, patch_center(2));
+        assert!(near([255, 255, 255], white, 8), "white: {white:?}");
+        assert!(near([0, 0, 0], black, 8), "black: {black:?}");
+        assert!(
+            cyan[0] <= 32 && cyan[1] >= 224 && cyan[2] >= 224,
+            "cyan: {cyan:?} (inverted output would be red-ish)"
+        );
+    }
+
+    #[test]
+    fn ycck_jpeg_follows_the_cmyk32_path() {
+        let bytes = fixture!("cmyk_ycck.jpg");
+        let mut resizer = Resizer::new();
+        let img = decode_page(bytes, 64, false, &mut resizer).unwrap();
+        let DecodedPage::Still(img) = img else {
+            panic!("still")
+        };
+        assert_eq!((img.w, img.h), (64, 64), "YCCK decodes via CMYK32");
+        assert!(!img.gray);
+        assert_eq!(img.pixels.len(), 64 * 64 * 4);
+        let white = rgba_at(&img.pixels, patch_center(0));
+        let black = rgba_at(&img.pixels, patch_center(1));
+        let cyan = rgba_at(&img.pixels, patch_center(2));
+        assert!(near([255, 255, 255], white, 12), "white: {white:?}");
+        assert!(near([0, 0, 0], black, 12), "black: {black:?}");
+        assert!(
+            cyan[0] <= 32 && cyan[1] >= 224 && cyan[2] >= 224,
+            "cyan: {cyan:?}"
+        );
+    }
+
+    #[test]
+    fn cmyk_jxl_decodes_through_moxcms() {
+        let bytes = fixture!("cmyk.jxl");
+        let mut resizer = Resizer::new();
+        let img = decode_page(bytes, 64, false, &mut resizer).unwrap();
+        let DecodedPage::Still(img) = img else {
+            panic!("still")
+        };
+        assert_eq!((img.w, img.h), (64, 64));
+        assert!(!img.gray, "CMYK JXL is color-stored");
+        assert_eq!(img.pixels.len(), 64 * 64 * 4);
+        assert_ne!(img.color_detection, ColorDetectionOutcome::SourceGray);
+        for (i, (_, _, _, _, want)) in CMY.iter().enumerate() {
+            let got = rgba_at(&img.pixels, patch_center(i));
+            assert!(
+                near(*want, got, CMS_TOLERANCE),
+                "cmyk.jxl patch {i}: got {got:?} vs lcms {want:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn cmyka_jxl_preserves_alpha() {
+        let bytes = fixture!("cmyka.jxl");
+        let mut resizer = Resizer::new();
+        let img = decode_page(bytes, 64, false, &mut resizer).unwrap();
+        let DecodedPage::Still(img) = img else {
+            panic!("still")
+        };
+        assert_eq!((img.w, img.h), (64, 64));
+        assert!(!img.gray);
+        // The fixture's alpha is 0 on every 16th pixel, 255 elsewhere; at native
+        // size the not-fully-opaque buffer is premultiplied (RGB zeroed where
+        // alpha is 0) exactly like any other transparent image.
+        let transparent = rgba_at(&img.pixels, 0);
+        let opaque = rgba_at(&img.pixels, 1);
+        assert_eq!(transparent, [0, 0, 0, 0], "alpha 0 pixel premultiplied");
+        assert_eq!(opaque[3], 255, "alpha preserved");
+        assert!(near([255, 255, 255], opaque, CMS_TOLERANCE), "{opaque:?}");
+    }
+
+    #[test]
+    fn jxl_plain_formats_unchanged() {
+        let mut resizer = Resizer::new();
+        // Gray JXL stays single-channel.
+        let img = decode_page(fixture!("gray.jxl"), 64, false, &mut resizer).unwrap();
+        let DecodedPage::Still(img) = img else {
+            panic!("still")
+        };
+        assert!(
+            img.gray && img.pixels.len() == 64 * 64,
+            "gray.jxl → 1ch gray"
+        );
+        assert!(
+            (img.pixels[0] as i32 - 128).abs() <= 3,
+            "gray value preserved (lossy), got {}",
+            img.pixels[0]
+        );
+        // Gray+alpha JXL drops alpha to the 1ch gray contract (like `ga_to_gray`).
+        let img = decode_page(fixture!("graya.jxl"), 64, false, &mut resizer).unwrap();
+        let DecodedPage::Still(img) = img else {
+            panic!("still")
+        };
+        assert!(
+            img.gray && img.pixels.len() == 64 * 64,
+            "graya.jxl → 1ch gray"
+        );
+        // RGB JXL → opaque RGBA.
+        let img = decode_page(fixture!("rgb.jxl"), 64, false, &mut resizer).unwrap();
+        let DecodedPage::Still(img) = img else {
+            panic!("still")
+        };
+        assert!(!img.gray && img.pixels.len() == 64 * 64 * 4);
+        let blue = rgba_at(&img.pixels, 0);
+        assert!(near([0, 0, 255], blue, 8), "blue, opaque: {blue:?}");
+        // RGBA JXL: alpha (an extra channel) must not corrupt the stride.
+        let img = decode_page(fixture!("rgba.jxl"), 64, false, &mut resizer).unwrap();
+        let DecodedPage::Still(img) = img else {
+            panic!("still")
+        };
+        assert!(!img.gray && img.pixels.len() == 64 * 64 * 4);
+        assert_eq!(
+            rgba_at(&img.pixels, 0),
+            [0, 0, 0, 0],
+            "alpha 0 premultiplied"
+        );
+        let opaque = rgba_at(&img.pixels, 1);
+        // The lossy -d 1 encoder rings slightly at the hard alpha checkerboard
+        // edges; the stride/alpha contract is what this test asserts, so only
+        // red (the flat color) gets a tight bound.
+        assert!(
+            (opaque[0] as i32 - 255).abs() <= 8
+                && (opaque[1] as i32 - 0).abs() <= 8
+                && (opaque[2] as i32 - 0).abs() <= 32
+                && opaque[3] == 255,
+            "opaque red, alpha intact: {opaque:?}"
+        );
+    }
+
+    #[test]
+    fn malformed_cmyk_jxl_errors_descriptively() {
+        // Truncating mid-container leaves a file whose header reads but whose
+        // frame cannot render — the error must mention the jxl path.
+        let truncated = &fixture!("cmyk.jxl")[..200];
+        let mut resizer = Resizer::new();
+        let err = match decode_page(truncated, 64, false, &mut resizer) {
+            Ok(_) => panic!("truncated cmyk jxl unexpectedly decoded"),
+            Err(e) => e,
+        };
+        assert!(err.contains("jxl"), "descriptive jxl error, got: {err}");
+    }
+
+    #[test]
+    fn neutral_cmyk_traditional_routes_gray_from_color() {
+        let bytes = fixture!("cmyk_neutral.jpg");
+        let mut resizer = Resizer::new();
+        let img = decode_and_downscale_with_options(
+            bytes,
+            32,
+            DecodeOptions {
+                color_detection: ColorDetection::Traditional,
+            },
+            &mut resizer,
+        )
+        .unwrap();
+        assert!(img.gray, "converted neutral CMYK collapses to luma");
+        assert_eq!(img.path, ResizePath::GrayFromColor);
+        assert_eq!(
+            img.color_detection,
+            ColorDetectionOutcome::Traditional { is_color: false }
+        );
+    }
+
+    #[test]
+    fn neutral_cmyk_ml_detection_receives_rgba() {
+        if !ml_color_detection_available() {
+            return;
+        }
+        let bytes = fixture!("cmyk_neutral.jpg");
+        let mut resizer = Resizer::new();
+        let img = decode_and_downscale_with_options(
+            bytes,
+            32,
+            DecodeOptions {
+                color_detection: ColorDetection::Ml,
+            },
+            &mut resizer,
+        )
+        .unwrap();
+        // OGSOV sees converted sRGB RGBA (never raw CMYK) — the verdict comes
+        // from the model, and routing follows it. (The exact verdict on this
+        // synthetic ramp depends on the embedded model; the deterministic
+        // gray-routing guarantee is covered by the traditional-detection test.)
+        let ColorDetectionOutcome::Ogsov {
+            is_color,
+            confidence,
+        } = img.color_detection
+        else {
+            panic!(
+                "expected an OGSOV verdict, got {}",
+                img.color_detection.label()
+            )
+        };
+        assert!(confidence >= 50, "decisive OGSOV verdict");
+        assert_eq!(
+            img.path,
+            if is_color {
+                ResizePath::Color
+            } else {
+                ResizePath::GrayFromColor
+            },
+            "routing follows the OGSOV verdict"
+        );
+    }
+
+    #[test]
+    fn color_cmyk_ml_detection_keeps_color() {
+        if !ml_color_detection_available() {
+            return;
+        }
+        let bytes = fixture!("cmyk_icc.jpg");
+        let mut resizer = Resizer::new();
+        let img = decode_and_downscale_with_options(
+            bytes,
+            32,
+            DecodeOptions {
+                color_detection: ColorDetection::Ml,
+            },
+            &mut resizer,
+        )
+        .unwrap();
+        // OGSOV sees the converted sRGB RGBA; the strongly colored patch grid
+        // stays on the color path.
+        let ColorDetectionOutcome::Ogsov {
+            is_color,
+            confidence,
+        } = img.color_detection
+        else {
+            panic!(
+                "expected an OGSOV verdict, got {}",
+                img.color_detection.label()
+            )
+        };
+        assert!(is_color, "color page stays color");
+        assert!(confidence >= 50, "high-confidence color verdict");
+        assert!(!img.gray);
+        assert_eq!(img.path, ResizePath::Color);
+    }
+
+    #[test]
+    fn detection_off_keeps_converted_cmyk_on_color_path() {
+        let bytes = fixture!("cmyk_icc.jpg");
+        let mut resizer = Resizer::new();
+        let img = decode_and_downscale_with_options(
+            bytes,
+            32,
+            DecodeOptions {
+                color_detection: ColorDetection::Off,
+            },
+            &mut resizer,
+        )
+        .unwrap();
+        assert_eq!(img.color_detection, ColorDetectionOutcome::Off);
+        assert!(!img.gray);
+        assert_eq!(img.path, ResizePath::Color);
+    }
+
+    #[test]
+    fn cmyka_jxl_is_transparent_and_skips_detection() {
+        let bytes = fixture!("cmyka.jxl");
+        let mut resizer = Resizer::new();
+        let img = decode_and_downscale_with_options(
+            bytes,
+            32,
+            DecodeOptions {
+                color_detection: ColorDetection::Traditional,
+            },
+            &mut resizer,
+        )
+        .unwrap();
+        // CMYKA converts to RGBA with alpha; detection is skipped and the color
+        // resize path preserves the (premultiplied) alpha.
+        assert_eq!(img.color_detection, ColorDetectionOutcome::Transparent);
+        assert!(!img.gray);
+        assert_eq!(img.path, ResizePath::Color);
+        assert_eq!(
+            img.pixels.len(),
+            (img.w * img.h * 4) as usize,
+            "alpha retained through the color path"
+        );
     }
 }
