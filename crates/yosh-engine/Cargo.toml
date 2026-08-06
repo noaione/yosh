@@ -25,10 +25,11 @@ bytemuck = { version = "1", features = ["derive"] }
 image = "0.25"
 png = "0.18"
 jpeg-decoder = "0.3"
-# Pure-Rust JPEG XL decoder (no C toolchain). default-features = false keeps out
-# the optional lcms2 (C) / image / rayon features — color is managed via qcms and
-# pages parallelize across the DecodePool, so JXL decodes single-threaded.
-jxl-oxide = { version = "0.12", default-features = false }
+# Pure-Rust JPEG XL decoder (no C toolchain). default-features = false keeps
+# out the optional lcms2 (C) / image / rayon features — `moxcms` (pure Rust,
+# already present via `image`) handles CMYK JXL color management, and pages
+# parallelize across the DecodePool, so JXL decodes single-threaded.
+jxl-oxide = { version = "0.12", default-features = false, features = ["moxcms"] }
 # Pure-Rust PSD parser (renders a PSD's flattened 8-bit RGB composite).
 psd = "0.3"
 fast_image_resize = "6"
@@ -54,7 +55,6 @@ encoding_rs = "0.8"
 # Hand-building zips with raw (non-UTF-8) entry names in tests needs real CRCs;
 # `zip`'s writer only accepts `&str` names, so it can't produce those archives.
 crc32fast = "1"
-jpeg-encoder = "0.7.1"
 # wgpu's stub backend (`Device::noop`), so `gesture.rs`'s tests can build a real
 # `Reader` — which needs a Device/Queue — with no GPU and no windowing. Resolver 2
 # keeps this feature out of every non-test build of the crate.
