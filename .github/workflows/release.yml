@@ -131,6 +131,15 @@ jobs:
           meson setup build --prefix=C:\build -Ddefault_library=static -Denable_tools=false -Denable_examples=false -Db_vscrt=mt --buildtype=release
           ninja -C build install
 
+      - name: Fetch OGSOV weights
+        shell: pwsh
+        env:
+          OGSOV_WEIGHTS_URL: ${{ secrets.OGSOV_WEIGHTS_URL }}
+        run: |
+          if ($env:OGSOV_WEIGHTS_URL) {
+            Invoke-WebRequest -Uri $env:OGSOV_WEIGHTS_URL -OutFile crates/ogsov/ogsov_weights.npz
+          }
+
       - name: Build
         run: cargo build --release -p yosh --features avif
         env:
@@ -239,6 +248,14 @@ jobs:
           echo "VERSION_NAME=$vn" >> "$GITHUB_ENV"
           echo "VERSION_CODE=$vc"  >> "$GITHUB_ENV"
           echo "APK version $vn (code $vc)"
+
+      - name: Fetch OGSOV weights
+        env:
+          OGSOV_WEIGHTS_URL: ${{ secrets.OGSOV_WEIGHTS_URL }}
+        run: |
+          if [ -n "$OGSOV_WEIGHTS_URL" ]; then
+            curl -fSL "$OGSOV_WEIGHTS_URL" -o crates/ogsov/ogsov_weights.npz
+          fi
 
       - name: Decode signing keystore
         if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}

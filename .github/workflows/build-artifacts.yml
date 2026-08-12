@@ -59,6 +59,15 @@ jobs:
           "SYSTEM_DEPS_DAV1D_LINK=static" >> $env:GITHUB_ENV
           pkg-config --modversion dav1d
 
+      - name: Fetch OGSOV weights
+        shell: pwsh
+        env:
+          OGSOV_WEIGHTS_URL: ${{ secrets.OGSOV_WEIGHTS_URL }}
+        run: |
+          if ($env:OGSOV_WEIGHTS_URL) {
+            Invoke-WebRequest -Uri $env:OGSOV_WEIGHTS_URL -OutFile crates/ogsov/ogsov_weights.npz
+          }
+
       - name: Build
         shell: pwsh
         env:
@@ -126,6 +135,14 @@ jobs:
       - name: Setup rust cache
         uses: Swatinem/rust-cache@7e35be21c2b94d972b1143087fabc27d7dc881ef # v2.9.1
 
+      - name: Fetch OGSOV weights
+        env:
+          OGSOV_WEIGHTS_URL: ${{ secrets.OGSOV_WEIGHTS_URL }}
+        run: |
+          if [ -n "$OGSOV_WEIGHTS_URL" ]; then
+            curl -fSL "$OGSOV_WEIGHTS_URL" -o crates/ogsov/ogsov_weights.npz
+          fi
+
       - name: Build
         run: cargo build --release -p yosh --features avif
 
@@ -159,6 +176,14 @@ jobs:
 
       - name: Setup rust cache
         uses: Swatinem/rust-cache@7e35be21c2b94d972b1143087fabc27d7dc881ef # v2.9.1
+
+      - name: Fetch OGSOV weights
+        env:
+          OGSOV_WEIGHTS_URL: ${{ secrets.OGSOV_WEIGHTS_URL }}
+        run: |
+          if [ -n "$OGSOV_WEIGHTS_URL" ]; then
+            curl -fSL "$OGSOV_WEIGHTS_URL" -o crates/ogsov/ogsov_weights.npz
+          fi
 
       - name: Build
         run: cargo build --release -p yosh --features avif --target aarch64-apple-darwin

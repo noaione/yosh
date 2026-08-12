@@ -2,3 +2,5 @@
 *.jks
 ogso[xv]*
 __pycache__
+
+*.npz
