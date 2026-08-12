@@ -1,3 +1,5 @@
 /target
 *.jks
 __pycache__
+
+*.npz
