@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use crate::cache::PageCache;
 use crate::decode::{DecodeOptions, MAX_TEX_DIM};
 use crate::layout::{Grid, Layout, WideSet};
-use crate::page::{fit_scale, FitMode, PageTexture, MAX_QUADS};
+use crate::page::{FitMode, MAX_QUADS, PageTexture, fit_scale};
 use crate::pool::{DecodePool, Msg, Waker};
 use crate::prefetch::desired_window;
 use crate::source::PageSource;
@@ -407,16 +407,23 @@ pub fn quad_from_px(
 const SPINE_FRAC: f32 = 0.08;
 const SPINE_MIN_PX: f32 = 6.0;
 const SPINE_MAX_PX: f32 = 256.0;
+/// User-selectable multiplier for the historical 8% spine width.
+const SPINE_WIDTH_MIN: f32 = 0.25;
+const SPINE_WIDTH_MAX: f32 = 1.0;
 
 /// Signed spine-shadow widths in UV for the (screen-left, screen-right) pages of
 /// a spread, from their on-screen pixel widths. Left page shades its right
 /// edge (+), right its left edge (−). 0.0 for degenerate widths.
-pub fn spine_uv(dwl: f32, dwr: f32) -> (f32, f32) {
+pub fn spine_uv(dwl: f32, dwr: f32, width_scale: f32) -> (f32, f32) {
+    let width_scale = width_scale.clamp(SPINE_WIDTH_MIN, SPINE_WIDTH_MAX);
     let w = |d: f32| {
         if d <= 1.0 {
             return 0.0;
         }
-        (d * SPINE_FRAC).clamp(SPINE_MIN_PX, SPINE_MAX_PX).min(d) / d
+        (d * SPINE_FRAC * width_scale)
+            .clamp(SPINE_MIN_PX, SPINE_MAX_PX)
+            .min(d)
+            / d
     };
     (w(dwl), -w(dwr))
 }
@@ -612,7 +619,11 @@ fn actual_target(
 /// `Windowed` (the pivot restride re-centres it as the reader travels), and
 /// nothing on `Off`. `None` ⇒ skip the tail build entirely. Split out of
 /// `prefetch` so the range math is testable without a GPU-backed `Reader`.
-fn lq_tail_range(tier: LqTier, index: usize, len: usize) -> Option<std::ops::RangeInclusive<usize>> {
+fn lq_tail_range(
+    tier: LqTier,
+    index: usize,
+    len: usize,
+) -> Option<std::ops::RangeInclusive<usize>> {
     if len == 0 {
         return None;
     }
@@ -676,9 +687,9 @@ pub struct Reader {
     /// only way to drop it. Kept outside the caches deliberately: those evict, and
     /// un-learning a joined page would re-pair the volume under the reader.
     wide: WideSet,
-    pub rotation: u8,         // 90° CW steps (0..=3); single-page draws only
-    pub zoom: f32,            // page-flip zoom factor (1.0 = fit)
-    pub pan_x: f32,           // page-flip pan offset in screen px (from centered)
+    pub rotation: u8, // 90° CW steps (0..=3); single-page draws only
+    pub zoom: f32,    // page-flip zoom factor (1.0 = fit)
+    pub pan_x: f32,   // page-flip pan offset in screen px (from centered)
     pub pan_y: f32,
     pub direction: Direction,
     /// Two-tier decode: LQ (fast) while seeking → HQ on settle. Off = always HQ
@@ -737,6 +748,9 @@ pub struct Reader {
     /// Effective spine-shadow strength, 0..1 (`0.0` = disabled). Set by the shell,
     /// which owns the enabled × strength settings; the engine sees one number.
     pub spine_strength: f32,
+    /// Width multiplier for an un-joined spread's spine shadow. `1.0` preserves
+    /// historical width; callers may select 25% through 100%.
+    pub spine_width: f32,
     /// The live flip animation, if one is in flight. Cleared once it expires.
     transition: Option<PageTransition>,
     /// Live interactive page drag (page-flip mode only), if one is in progress.
@@ -869,6 +883,7 @@ impl Reader {
             fit_no_upscale: false,
             transition_enabled: false,
             spine_strength: 0.0,
+            spine_width: 1.0,
             transition: None,
             drag: None,
             anim_drawn: std::cell::Cell::new(false),
@@ -1273,8 +1288,15 @@ impl Reader {
         }
         // Equals single_quad's draw scale `s`: native scale × (src_h / decoded_h).
         let (sw, sh, fit_w, fit_h, dec_h, src_h, cap) = self.anchor_metrics()?;
-        let native =
-            anchor_native_scale(self.fit, (sw, sh), (fit_w, fit_h), dec_h, src_h, cap, self.zoom);
+        let native = anchor_native_scale(
+            self.fit,
+            (sw, sh),
+            (fit_w, fit_h),
+            dec_h,
+            src_h,
+            cap,
+            self.zoom,
+        );
         Some(native * src_h / dec_h.max(1.0))
     }
 
@@ -1560,7 +1582,8 @@ impl Reader {
 
         // Page-turn transition: overlay the previous view, fading + smearing out.
         if let Some(t) = &self.transition {
-            let p = (t.start.elapsed().as_secs_f32() / (TRANSITION_MS as f32 / 1000.0)).clamp(0.0, 1.0);
+            let p =
+                (t.start.elapsed().as_secs_f32() / (TRANSITION_MS as f32 / 1000.0)).clamp(0.0, 1.0);
             if p < 1.0 {
                 self.anim_drawn.set(true);
                 let eased = 1.0 - (1.0 - p) * (1.0 - p); // ease-out (slide + defocus)
@@ -1614,7 +1637,15 @@ impl Reader {
     /// `slot_base` is the first GPU quad slot to use. `hold_last` falls back to the
     /// last-drawn page when the anchor isn't cached yet (current view only; the
     /// transition overlay passes `false` so a missing outgoing page just snaps).
-    fn place_view(&self, a: usize, b: Option<usize>, sw: f32, sh: f32, slot_base: usize, hold_last: bool) -> Vec<Quad> {
+    fn place_view(
+        &self,
+        a: usize,
+        b: Option<usize>,
+        sw: f32,
+        sh: f32,
+        slot_base: usize,
+        hold_last: bool,
+    ) -> Vec<Quad> {
         let ta = self.page_texture(a);
         let tb = b.and_then(|bi| self.page_texture(bi).map(|t| (bi, t)));
 
@@ -1638,12 +1669,22 @@ impl Reader {
                 let dwl_r = dwl.round();
                 let mut v = vec![
                     quad_from_px(slot_base, l_idx, xl, yt, dwl_r, dhr, sw, sh, 0),
-                    quad_from_px(slot_base + 1, r_idx, xl + dwl_r, yt, dwr.round(), dhr, sw, sh, 0),
+                    quad_from_px(
+                        slot_base + 1,
+                        r_idx,
+                        xl + dwl_r,
+                        yt,
+                        dwr.round(),
+                        dhr,
+                        sw,
+                        sh,
+                        0,
+                    ),
                 ];
                 // Only an un-joined pair gets the gutter shading; the wide-spread and
                 // single arms below never touch these fields.
                 if self.spine_strength > 0.0 {
-                    let (sl, sr) = spine_uv(dwl_r, dwr.round());
+                    let (sl, sr) = spine_uv(dwl_r, dwr.round(), self.spine_width);
                     v[0].spine = sl;
                     v[1].spine = sr;
                     v[0].spine_strength = self.spine_strength;
@@ -1874,7 +1915,11 @@ impl Reader {
             // Decode target = the texture height that draws 1:1. For a rotated
             // single page the texture's height lands along the screen *width*, so
             // the target is the box width (box_h * content_aspect); else box height.
-            if rotated { box_h * content_aspect } else { box_h }
+            if rotated {
+                box_h * content_aspect
+            } else {
+                box_h
+            }
         };
         // No-upscale (issue #13): a fit never scales a page past 100% native, so the
         // decode target is bounded by the page's own displayed-at-native height,
@@ -1883,8 +1928,7 @@ impl Reader {
         // shared height all scale linearly with the fit — so one `min` here covers
         // the lot, and it is the *identical* value the draw sites apply through
         // `upscale_cap`. `INFINITY` with the option off ⇒ today's target verbatim.
-        (target.min(self.upscale_target_cap(index, paired)).round() as u32)
-            .clamp(MIN_TARGET, max_h)
+        (target.min(self.upscale_target_cap(index, paired)).round() as u32).clamp(MIN_TARGET, max_h)
     }
 
     /// Debounce the decode view. While the surface size or zoom is changing (a
@@ -2015,8 +2059,8 @@ impl Reader {
 mod tests {
     use super::Budget;
     use super::{
-        drag_commits, drag_dir, drag_resist, Direction, DRAG_COMMIT_FRAC, DRAG_FLICK_MIN_FRAC,
-        DRAG_MAX_FRAC,
+        DRAG_COMMIT_FRAC, DRAG_FLICK_MIN_FRAC, DRAG_MAX_FRAC, Direction, drag_commits, drag_dir,
+        drag_resist,
     };
 
     // Drag metaphor: pulling the page toward the "previous" edge advances.
@@ -2086,10 +2130,13 @@ mod tests {
     // cleared pivot (source/pool swap) always rebuilds.
     #[test]
     fn tail_rebuilds_once_per_stride_of_travel() {
-        use super::{tail_needs_restride, LQ_TAIL_RESTRIDE};
+        use super::{LQ_TAIL_RESTRIDE, tail_needs_restride};
         let pivot = Some(100);
         assert!(tail_needs_restride(None, 100), "no tail yet → build one");
-        assert!(!tail_needs_restride(pivot, 100), "standing still never rebuilds");
+        assert!(
+            !tail_needs_restride(pivot, 100),
+            "standing still never rebuilds"
+        );
         assert!(
             !tail_needs_restride(pivot, 100 + LQ_TAIL_RESTRIDE - 1),
             "31 pages of travel keeps the queued tail"
@@ -2133,9 +2180,18 @@ mod tests {
             failed_len: 0,
         };
         // `Layout` has no `Debug`, so compare with `==` rather than assert_eq!.
-        assert!(key(7, 1, 0) == key(7, 99, 0), "a landing thumbnail must not rebuild the job list");
-        assert!(key(7, 1, 0) != key(8, 1, 0), "a landing full-res page still rebuilds it");
-        assert!(key(7, 1, 0) != key(7, 1, 1), "a newly-learned joined spread re-pairs, so it must rebuild");
+        assert!(
+            key(7, 1, 0) == key(7, 99, 0),
+            "a landing thumbnail must not rebuild the job list"
+        );
+        assert!(
+            key(7, 1, 0) != key(8, 1, 0),
+            "a landing full-res page still rebuilds it"
+        );
+        assert!(
+            key(7, 1, 0) != key(7, 1, 1),
+            "a newly-learned joined spread re-pairs, so it must rebuild"
+        );
     }
 
     // Desktop-class inputs reproduce the historical fixed budget exactly.
@@ -2155,7 +2211,11 @@ mod tests {
     #[test]
     fn budget_small_heap_scales_down_with_floors() {
         let small = Budget::derive(192, 8); // ~192 MB app heap
-        assert!(small.cache_cap < 48 && small.cache_cap >= 16, "{}", small.cache_cap);
+        assert!(
+            small.cache_cap < 48 && small.cache_cap >= 16,
+            "{}",
+            small.cache_cap
+        );
         assert!(small.texpool_max < 24 && small.texpool_max >= 8);
         assert!(small.fwd < 16 && small.fwd >= 6);
         // Extreme floor: a tiny budget + few cores still yields a usable reader.
@@ -2196,7 +2256,15 @@ mod tests {
 
         let low = Budget::for_tier(DeviceTier::Low, 1024, 8);
         assert_eq!(
-            (low.workers, low.cache_cap, low.texpool_max, low.fwd, low.fwd_max, low.back, low.lq_cap),
+            (
+                low.workers,
+                low.cache_cap,
+                low.texpool_max,
+                low.fwd,
+                low.fwd_max,
+                low.back,
+                low.lq_cap
+            ),
             (3, 20, 10, 6, 12, 3, 320)
         );
         assert_eq!(low.actual_cap_vh, Some(2));
@@ -2205,7 +2273,15 @@ mod tests {
 
         let mid = Budget::for_tier(DeviceTier::Mid, 1024, 8);
         assert_eq!(
-            (mid.workers, mid.cache_cap, mid.texpool_max, mid.fwd, mid.fwd_max, mid.back, mid.lq_cap),
+            (
+                mid.workers,
+                mid.cache_cap,
+                mid.texpool_max,
+                mid.fwd,
+                mid.fwd_max,
+                mid.back,
+                mid.lq_cap
+            ),
             (6, 32, 16, 10, 24, 4, 512)
         );
         assert_eq!(mid.actual_cap_vh, Some(4));
@@ -2242,7 +2318,11 @@ mod tests {
         let (max_h, vh) = (8192u32, 2400u32);
 
         // Desktop / High: no cap anywhere.
-        assert_eq!(actual_target(None, 1.0, max_h, vh, None), u32::MAX, "uncached decodes full");
+        assert_eq!(
+            actual_target(None, 1.0, max_h, vh, None),
+            u32::MAX,
+            "uncached decodes full"
+        );
         assert_eq!(actual_target(Some(5200.0), 1.0, max_h, vh, None), 5200);
         assert_eq!(actual_target(Some(5200.0), 0.5, max_h, vh, None), 2600);
 
@@ -2257,8 +2337,14 @@ mod tests {
         assert_eq!(actual_target(Some(9000.0), 1.0, max_h, vh, Some(4)), max_h);
 
         // Degenerate inputs can't produce an inverted clamp range (a panic).
-        assert_eq!(actual_target(Some(1000.0), 0.0, max_h, 0, Some(2)), super::MIN_TARGET);
-        assert_eq!(actual_target(None, 1.0, max_h, 1, Some(2)), super::MIN_TARGET);
+        assert_eq!(
+            actual_target(Some(1000.0), 0.0, max_h, 0, Some(2)),
+            super::MIN_TARGET
+        );
+        assert_eq!(
+            actual_target(None, 1.0, max_h, 1, Some(2)),
+            super::MIN_TARGET
+        );
     }
 
     // `LqTier` decides how much of a volume the thumbnail tail may cover: all of it
@@ -2268,15 +2354,31 @@ mod tests {
     // the last page.
     #[test]
     fn lq_tail_range_windows_the_thumbnail_tier() {
-        use super::{lq_tail_range, LqTier};
-        assert_eq!(lq_tail_range(LqTier::Full, 300, 500), Some(0..=499), "whole volume");
+        use super::{LqTier, lq_tail_range};
+        assert_eq!(
+            lq_tail_range(LqTier::Full, 300, 500),
+            Some(0..=499),
+            "whole volume"
+        );
         assert_eq!(lq_tail_range(LqTier::Off, 300, 500), None, "no tail at all");
 
         let w = LqTier::Windowed(64);
         assert_eq!(lq_tail_range(w, 300, 500), Some(236..=364));
-        assert_eq!(lq_tail_range(w, 10, 500), Some(0..=74), "clamped at the start");
-        assert_eq!(lq_tail_range(w, 480, 500), Some(416..=499), "clamped at the end");
-        assert_eq!(lq_tail_range(w, 5, 20), Some(0..=19), "a short volume is fully covered");
+        assert_eq!(
+            lq_tail_range(w, 10, 500),
+            Some(0..=74),
+            "clamped at the start"
+        );
+        assert_eq!(
+            lq_tail_range(w, 480, 500),
+            Some(416..=499),
+            "clamped at the end"
+        );
+        assert_eq!(
+            lq_tail_range(w, 5, 20),
+            Some(0..=19),
+            "a short volume is fully covered"
+        );
         // Travelling a restride (32 pages) shifts the band, so pages that were
         // outside it become eligible — this is what keeps a scrub previewable.
         let before = lq_tail_range(w, 300, 500).unwrap();
@@ -2340,13 +2442,15 @@ mod tests {
     // agree across fit modes, aspects, zooms, and surface sizes.
     #[test]
     pub fn decode_target_matches_drawn_size() {
-        use crate::page::{fit_scale, FitMode};
+        use crate::page::{FitMode, fit_scale};
         for (sw, sh) in [(3840.0_f32, 2160.0_f32), (1920.0, 1080.0), (1600.0, 2560.0)] {
             for fit in [FitMode::Window, FitMode::Width, FitMode::Height] {
                 for aspect in [0.5_f32, 0.69, 1.0, 1.5] {
                     for zoom in [0.1_f32, 0.5, 1.0] {
                         // Decode target = the page's displayed height (page_target_h).
-                        let th = (fit_scale(fit, sw, sh, aspect, 1.0) * zoom).round().max(1.0);
+                        let th = (fit_scale(fit, sw, sh, aspect, 1.0) * zoom)
+                            .round()
+                            .max(1.0);
                         let tw = (th * aspect).round().max(1.0);
                         // build_quads draws that decoded (tw x th) texture at height:
                         let drawn = th * fit_scale(fit, sw, sh, tw, th) * zoom;
@@ -2368,7 +2472,7 @@ mod tests {
     // width — i.e. the rotated-draw fit scale stays ~1, so no second GPU resize.
     #[test]
     pub fn decode_target_matches_drawn_size_rotated() {
-        use crate::page::{fit_scale, FitMode};
+        use crate::page::{FitMode, fit_scale};
         for (sw, sh) in [(3840.0_f32, 2160.0_f32), (1920.0, 1080.0), (1600.0, 2560.0)] {
             for fit in [FitMode::Window, FitMode::Width, FitMode::Height] {
                 for aspect in [0.5_f32, 0.69, 1.0, 1.5] {
@@ -2423,19 +2527,35 @@ mod tests {
     #[test]
     pub fn pan_bounds_match_drawn_spread() {
         use super::pair_box_px;
-        use crate::page::{fit_scale, FitMode};
+        use crate::page::{FitMode, fit_scale};
         let (sw, sh) = (1600.0_f32, 1000.0_f32);
         let (src_w, src_h) = (1000.0_f32, 1500.0_f32);
         let aspect = src_w / src_h;
-        for (zoom, want) in [(1.25_f32, 33.0_f32), (1.5, 200.0), (2.0, 533.3), (3.0, 1200.0)] {
+        for (zoom, want) in [
+            (1.25_f32, 33.0_f32),
+            (1.5, 200.0),
+            (2.0, 533.3),
+            (3.0, 1200.0),
+        ] {
             // page_target_h's spread arm: both pages decode to the pair's drawn
             // height (content aspect = 2 × the page's), capped at the source height.
-            let th = (fit_scale(FitMode::Window, sw, sh, aspect * 2.0, 1.0) * zoom).min(src_h).round();
+            let th = (fit_scale(FitMode::Window, sw, sh, aspect * 2.0, 1.0) * zoom)
+                .min(src_h)
+                .round();
             let tw = (th * aspect).round();
-            let (wa, wb, _) =
-                pair_box_px(FitMode::Window, (sw, sh), (tw, th), (tw, th), f32::INFINITY, zoom);
+            let (wa, wb, _) = pair_box_px(
+                FitMode::Window,
+                (sw, sh),
+                (tw, th),
+                (tw, th),
+                f32::INFINITY,
+                zoom,
+            );
             let mx = ((wa + wb - sw) / 2.0).max(0.0);
-            assert!((mx - want).abs() <= 1.0, "zoom {zoom}: pan_x limit {mx}, want {want}");
+            assert!(
+                (mx - want).abs() <= 1.0,
+                "zoom {zoom}: pan_x limit {mx}, want {want}"
+            );
         }
     }
 
@@ -2451,9 +2571,12 @@ mod tests {
         use crate::page::FitMode;
         let (sw, sh) = (1600.0_f32, 1000.0_f32);
         let (src_w, src_h) = (3000.0_f32, 4000.0_f32);
-        for (zoom, want_my, want_overflow) in
-            [(1.0_f32, 1500.0_f32, true), (0.75, 1000.0, true), (0.5, 500.0, true), (0.25, 0.0, false)]
-        {
+        for (zoom, want_my, want_overflow) in [
+            (1.0_f32, 1500.0_f32, true),
+            (0.75, 1000.0, true),
+            (0.5, 500.0, true),
+            (0.25, 0.0, false),
+        ] {
             let th = (src_h * zoom).round(); // actual_target decodes to the shown height
             let tw = (th * (src_w / src_h)).round();
             let (dw, dh) = single_box_px(
@@ -2472,8 +2595,15 @@ mod tests {
                 src_h * zoom,
             );
             let my = ((dh - sh) / 2.0).max(0.0);
-            assert!((my - want_my).abs() <= 0.5, "zoom {zoom}: pan_y limit {my}, want {want_my}");
-            assert_eq!(dh > sh + 0.5, want_overflow, "zoom {zoom}: overflow from drawn height {dh}");
+            assert!(
+                (my - want_my).abs() <= 0.5,
+                "zoom {zoom}: pan_y limit {my}, want {want_my}"
+            );
+            assert_eq!(
+                dh > sh + 0.5,
+                want_overflow,
+                "zoom {zoom}: overflow from drawn height {dh}"
+            );
         }
     }
 
@@ -2484,15 +2614,26 @@ mod tests {
     #[test]
     pub fn pan_bounds_match_drawn_rotated_single() {
         use super::single_box_px;
-        use crate::page::{fit_scale, FitMode};
+        use crate::page::{FitMode, fit_scale};
         let (sw, sh) = (1600.0_f32, 1000.0_f32);
         let (tw, th) = (1000.0_f32, 1500.0_f32); // portrait texture, decoded == source
         let boxed = |rotated| {
-            single_box_px(FitMode::Window, (sw, sh), (tw, th), (tw, th), rotated, f32::INFINITY, 2.0)
+            single_box_px(
+                FitMode::Window,
+                (sw, sh),
+                (tw, th),
+                (tw, th),
+                rotated,
+                f32::INFINITY,
+                2.0,
+            )
         };
         let (dw, dh) = boxed(true);
         let s = fit_scale(FitMode::Window, sw, sh, th, tw) * 2.0; // fits the swapped dims
-        assert!((dw - th * s).abs() <= 0.5 && (dh - tw * s).abs() <= 0.5, "turned box {dw}x{dh}");
+        assert!(
+            (dw - th * s).abs() <= 0.5 && (dh - tw * s).abs() <= 0.5,
+            "turned box {dw}x{dh}"
+        );
         let (uw, uh) = boxed(false);
         assert!(
             (uw - dw).abs() > 1.0 || (uh - dh).abs() > 1.0,
@@ -2507,7 +2648,7 @@ mod tests {
     #[test]
     pub fn pan_bounds_unchanged_for_single_page_fits() {
         use super::single_box_px;
-        use crate::page::{fit_scale, FitMode};
+        use crate::page::{FitMode, fit_scale};
         for (sw, sh) in [(3840.0_f32, 2160.0_f32), (1920.0, 1080.0), (1600.0, 2560.0)] {
             for fit in [FitMode::Window, FitMode::Width, FitMode::Height] {
                 for aspect in [0.5_f32, 0.69, 1.0, 1.5] {
@@ -2541,7 +2682,13 @@ mod tests {
     /// once the view scales by `k` about `center` with the new pan `pan1` — the forward
     /// direction of what `pan_about` inverts. Used to check the focal pin end to end
     /// rather than restating the formula.
-    fn projected(screen: (f32, f32), center: (f32, f32), pan: (f32, f32), pan1: (f32, f32), k: f32) -> (f32, f32) {
+    fn projected(
+        screen: (f32, f32),
+        center: (f32, f32),
+        pan: (f32, f32),
+        pan1: (f32, f32),
+        k: f32,
+    ) -> (f32, f32) {
         (
             center.0 + k * (screen.0 - center.0 - pan.0) + pan1.0,
             center.1 + k * (screen.1 - center.1 - pan.1) + pan1.1,
@@ -2555,7 +2702,12 @@ mod tests {
     pub fn pan_about_pins_the_focal_point() {
         use super::pan_about;
         let center = (800.0_f32, 500.0_f32);
-        for from in [(800.0_f32, 500.0_f32), (0.0, 0.0), (1600.0, 1000.0), (123.0, 940.0)] {
+        for from in [
+            (800.0_f32, 500.0_f32),
+            (0.0, 0.0),
+            (1600.0, 1000.0),
+            (123.0, 940.0),
+        ] {
             for pan in [(0.0_f32, 0.0_f32), (-250.0, 90.0), (400.0, -300.0)] {
                 for k in [0.25_f32, 0.5, 1.0, 1.3, 4.0] {
                     let pan1 = pan_about(from, from, center, pan, k);
@@ -2664,7 +2816,7 @@ mod tests {
     // *after* the cap.
     #[test]
     pub fn no_upscale_decode_target_matches_drawn_size() {
-        use crate::page::{fit_scale, FitMode};
+        use crate::page::{FitMode, fit_scale};
         for (sw, sh) in [(3840.0_f32, 2160.0_f32), (1920.0, 1080.0), (1600.0, 2560.0)] {
             for fit in [FitMode::Window, FitMode::Width, FitMode::Height] {
                 // A small page (every fit would stretch it) and a large one (every
@@ -2724,7 +2876,7 @@ mod tests {
     // `upscale_cap` is rotation-invariant precisely so both orientations share it.
     #[test]
     pub fn no_upscale_rotated() {
-        use crate::page::{fit_scale, FitMode};
+        use crate::page::{FitMode, fit_scale};
         for (sw, sh) in [(3840.0_f32, 2160.0_f32), (1920.0, 1080.0), (1600.0, 2560.0)] {
             for fit in [FitMode::Window, FitMode::Width, FitMode::Height] {
                 for (src_w, src_h) in [(400.0_f32, 600.0_f32), (3000.0, 4500.0)] {
@@ -2733,7 +2885,11 @@ mod tests {
                         // page_target_h (rotated): content_aspect = 1/aspect, target =
                         // box width = box_h / aspect, then the no-upscale clamp.
                         let box_h = fit_scale(fit, sw, sh, 1.0 / aspect, 1.0) * zoom;
-                        let th = (box_h / aspect).min(src_h * zoom).min(src_h).round().max(1.0);
+                        let th = (box_h / aspect)
+                            .min(src_h * zoom)
+                            .min(src_h)
+                            .round()
+                            .max(1.0);
                         let tw = (th * aspect).round().max(1.0);
                         // single_quad swaps (w,h) for the odd rotation: ew = th, eh = tw.
                         let s = fit_scale(fit, sw, sh, th, tw).min(src_h / th) * zoom;
@@ -2762,7 +2918,7 @@ mod tests {
     // both), and neither page above 100% of its own native.
     #[test]
     pub fn no_upscale_spread_pair() {
-        use crate::page::{fit_scale, FitMode};
+        use crate::page::{FitMode, fit_scale};
         for (sw, sh) in [(3840.0_f32, 2160.0_f32), (1920.0, 1080.0), (1600.0, 2560.0)] {
             for fit in [FitMode::Window, FitMode::Width, FitMode::Height] {
                 // (uniform small, mixed small/large, uniform large) — same aspect in
@@ -2783,8 +2939,10 @@ mod tests {
                         // place_view: size both to a common reference height, fit the
                         // combined width, and cap at the pair's smaller native.
                         let h_ref = ta_h.max(tb_h);
-                        let combined_w = ta_h * aspect * h_ref / ta_h + tb_h * aspect * h_ref / tb_h;
-                        let s = fit_scale(fit, sw, sh, combined_w, h_ref).min(pair_cap / h_ref) * zoom;
+                        let combined_w =
+                            ta_h * aspect * h_ref / ta_h + tb_h * aspect * h_ref / tb_h;
+                        let s =
+                            fit_scale(fit, sw, sh, combined_w, h_ref).min(pair_cap / h_ref) * zoom;
                         let dh = h_ref * s;
                         for (label, th, native) in [("a", ta_h, ha), ("b", tb_h, hb)] {
                             assert!(
@@ -2819,7 +2977,11 @@ mod tests {
                     let cw = sw.min(src_w) * zoom;
                     // page_target_h (scroll arm) + the no-upscale clamp; target_dims
                     // then caps the decode at the source height.
-                    let th = (sw * zoom / aspect).min(src_h * zoom).min(src_h).round().max(1.0);
+                    let th = (sw * zoom / aspect)
+                        .min(src_h * zoom)
+                        .min(src_h)
+                        .round()
+                        .max(1.0);
                     let tw = (th * aspect).round().max(1.0);
                     let drawn_h = cw * (th / tw); // page_display_h uses the decoded aspect
                     assert!(
@@ -2852,15 +3014,48 @@ mod tests {
         // A 2048-tall page that fit-to-window would stretch to 2160 (~105%) — see
         // `anchor_native_scale_fit_to_window_reports_upscale`, the same case uncapped.
         let cap = 2048.0 / 2048.0; // upscale_cap(src_h, tex_h)
-        let s = anchor_native_scale(FitMode::Window, screen, (1448.0, 2048.0), 2048.0, 2048.0, cap, 1.0);
-        assert!((s - 1.0).abs() < 1e-4, "capped fit must report 100%, got {s}");
+        let s = anchor_native_scale(
+            FitMode::Window,
+            screen,
+            (1448.0, 2048.0),
+            2048.0,
+            2048.0,
+            cap,
+            1.0,
+        );
+        assert!(
+            (s - 1.0).abs() < 1e-4,
+            "capped fit must report 100%, got {s}"
+        );
         // Zoom multiplies after the cap, so manual magnification still works.
-        let z = anchor_native_scale(FitMode::Window, screen, (1448.0, 2048.0), 2048.0, 2048.0, cap, 2.5);
-        assert!((z - 2.5).abs() < 1e-4, "zoom past the cap must magnify, got {z}");
+        let z = anchor_native_scale(
+            FitMode::Window,
+            screen,
+            (1448.0, 2048.0),
+            2048.0,
+            2048.0,
+            cap,
+            2.5,
+        );
+        assert!(
+            (z - 2.5).abs() < 1e-4,
+            "zoom past the cap must magnify, got {z}"
+        );
         // A page *larger* than the window fits down as always: the cap (1.0) is
         // above the fit scale (2160/4500 = 0.48), so the min leaves it alone.
-        let big = anchor_native_scale(FitMode::Window, screen, (3000.0, 4500.0), 4500.0, 4500.0, 1.0, 1.0);
-        assert!((big - 2160.0 / 4500.0).abs() < 1e-4, "large page still fits down, got {big}");
+        let big = anchor_native_scale(
+            FitMode::Window,
+            screen,
+            (3000.0, 4500.0),
+            4500.0,
+            4500.0,
+            1.0,
+            1.0,
+        );
+        assert!(
+            (big - 2160.0 / 4500.0).abs() < 1e-4,
+            "large page still fits down, got {big}"
+        );
     }
 
     // Spine-shadow sign convention: the screen-left page shades its right edge
@@ -2869,11 +3064,11 @@ mod tests {
     // edges. Equal widths ⇒ a symmetric seam; degenerate widths ⇒ off.
     #[test]
     fn spine_uv_signs_and_sides() {
-        let (l, r) = super::spine_uv(800.0, 800.0);
+        let (l, r) = super::spine_uv(800.0, 800.0, 1.0);
         assert!(l > 0.0, "screen-left page shades its right edge (+)");
         assert!(r < 0.0, "screen-right page shades its left edge (−)");
         assert!((l + r).abs() < 1e-6, "equal widths ⇒ symmetric seam");
-        let (l, r) = super::spine_uv(0.0, 1.0);
+        let (l, r) = super::spine_uv(0.0, 1.0, 1.0);
         assert!(l == 0.0 && r == 0.0, "degenerate widths ⇒ no shadow");
     }
 
@@ -2881,16 +3076,40 @@ mod tests {
     // vanishes on a small page nor balloons when zoomed. Always ≤ the page (UV ≤ 1).
     #[test]
     fn spine_uv_px_clamps() {
-        let (l, _) = super::spine_uv(4000.0, 4000.0);
-        assert!((l - super::SPINE_MAX_PX / 4000.0).abs() < 1e-6, "wide page hits the px cap");
-        let (l, _) = super::spine_uv(60.0, 60.0);
-        assert!((l - super::SPINE_MIN_PX / 60.0).abs() < 1e-6, "narrow page hits the px floor");
-        let (l, _) = super::spine_uv(800.0, 800.0);
-        assert!((l - super::SPINE_FRAC).abs() < 1e-6, "mid page uses the fraction");
+        let (l, _) = super::spine_uv(4000.0, 4000.0, 1.0);
+        assert!(
+            (l - super::SPINE_MAX_PX / 4000.0).abs() < 1e-6,
+            "wide page hits the px cap"
+        );
+        let (l, _) = super::spine_uv(60.0, 60.0, 1.0);
+        assert!(
+            (l - super::SPINE_MIN_PX / 60.0).abs() < 1e-6,
+            "narrow page hits the px floor"
+        );
+        let (l, _) = super::spine_uv(800.0, 800.0, 1.0);
+        assert!(
+            (l - super::SPINE_FRAC).abs() < 1e-6,
+            "mid page uses the fraction"
+        );
         for w in [2.0_f32, 50.0, 240.0, 800.0, 4000.0] {
-            let (l, r) = super::spine_uv(w, w);
-            assert!(l <= 1.0 && -r <= 1.0, "w {w}: uv width {l} exceeds the page");
+            let (l, r) = super::spine_uv(w, w, 1.0);
+            assert!(
+                l <= 1.0 && -r <= 1.0,
+                "w {w}: uv width {l} exceeds the page"
+            );
         }
+    }
+
+    #[test]
+    fn spine_uv_width_scale_is_bounded() {
+        let (narrow, _) = super::spine_uv(800.0, 800.0, 0.25);
+        assert!((narrow - super::SPINE_FRAC * 0.25).abs() < 1e-6);
+
+        let (below_min, _) = super::spine_uv(800.0, 800.0, 0.0);
+        assert!((below_min - narrow).abs() < 1e-6);
+
+        let (above_max, _) = super::spine_uv(800.0, 800.0, 2.0);
+        assert!((above_max - super::SPINE_FRAC).abs() < 1e-6);
     }
 
     // Every quad is built by `quad_from_px`, which leaves the shadow off — so the
@@ -2909,9 +3128,17 @@ mod tests {
     pub fn zoom_multiplier_clamps_to_native_bounds() {
         let base = 2160.0_f32 / 2048.0; // native scale at zoom = 1 (fit-to-window)
         let lo = super::clamp_zoom_multiplier(1e-6, base);
-        assert!((lo * base - super::MIN_ZOOM_PCT).abs() < 1e-4, "lo eff {}", lo * base);
+        assert!(
+            (lo * base - super::MIN_ZOOM_PCT).abs() < 1e-4,
+            "lo eff {}",
+            lo * base
+        );
         let hi = super::clamp_zoom_multiplier(1e9, base);
-        assert!((hi * base - super::MAX_ZOOM_PCT).abs() < 1e-2, "hi eff {}", hi * base);
+        assert!(
+            (hi * base - super::MAX_ZOOM_PCT).abs() < 1e-2,
+            "hi eff {}",
+            hi * base
+        );
         let mid = super::clamp_zoom_multiplier(1.0, base);
         assert!((mid - 1.0).abs() < 1e-6, "mid {mid}");
     }
@@ -2976,25 +3203,34 @@ mod tests {
     // from a mid-list change that shifts indices and needs a name-based remap.
     #[test]
     fn classify_refresh_distinguishes_append_trim_and_reorder() {
-        use super::{classify_refresh, Refresh};
+        use super::{Refresh, classify_refresh};
         let src = |names: &[&str]| NamesSource(names.iter().map(|s| s.to_string()).collect());
         let base = src(&["1.png", "2.png", "3.png"]);
         // Identical listing → nothing to do.
-        assert_eq!(classify_refresh(&base, &src(&["1.png", "2.png", "3.png"])), Refresh::Same);
+        assert_eq!(
+            classify_refresh(&base, &src(&["1.png", "2.png", "3.png"])),
+            Refresh::Same
+        );
         // Pages appended at the end → existing indices unchanged.
         assert_eq!(
             classify_refresh(&base, &src(&["1.png", "2.png", "3.png", "4.png"])),
             Refresh::Prefix
         );
         // Pages trimmed from the end → still a prefix.
-        assert_eq!(classify_refresh(&base, &src(&["1.png", "2.png"])), Refresh::Prefix);
+        assert_eq!(
+            classify_refresh(&base, &src(&["1.png", "2.png"])),
+            Refresh::Prefix
+        );
         // A file inserted mid-list (natural sort places "1a" between "1" and "2").
         assert_eq!(
             classify_refresh(&base, &src(&["1.png", "1a.png", "2.png", "3.png"])),
             Refresh::Reorder
         );
         // A middle file removed → indices after it shift.
-        assert_eq!(classify_refresh(&base, &src(&["1.png", "3.png"])), Refresh::Reorder);
+        assert_eq!(
+            classify_refresh(&base, &src(&["1.png", "3.png"])),
+            Refresh::Reorder
+        );
     }
 }
 
@@ -3019,7 +3255,9 @@ impl Reader {
     /// reasons `step` can return false (e.g. the LQ warm-up gate) — a shell uses
     /// this to offer "next/previous book" when a flip runs out of pages.
     pub fn at_edge(&self, dir: i64) -> bool {
-        let Some(src) = &self.source else { return false };
+        let Some(src) = &self.source else {
+            return false;
+        };
         let len = src.len();
         if len == 0 {
             return false;
@@ -3036,7 +3274,9 @@ impl Reader {
     /// dragged page displacement for a committed interactive drag, so the same
     /// slide+fade+blur animation picks up where the finger left the page.
     fn step_styled(&mut self, dir: i64, from_frac: f32) -> bool {
-        let Some(src) = &self.source else { return false };
+        let Some(src) = &self.source else {
+            return false;
+        };
         let len = src.len();
         if len == 0 {
             return false;
@@ -3105,7 +3345,12 @@ impl Reader {
         self.transition = None;
         match &mut self.drag {
             Some(d) if d.settle.is_none() => d.dx = dx_px,
-            _ => self.drag = Some(PageDrag { dx: dx_px, settle: None }),
+            _ => {
+                self.drag = Some(PageDrag {
+                    dx: dx_px,
+                    settle: None,
+                })
+            }
         }
     }
 
@@ -3154,7 +3399,11 @@ impl Reader {
         // so this is a no-op there (and in single-page layout). Scroll mode is excluded
         // because `layout` persists across the mode toggle, and there `index` is a
         // strip position, not a pairing anchor.
-        self.index = if self.scroll_mode { index } else { self.view_start(index) };
+        self.index = if self.scroll_mode {
+            index
+        } else {
+            self.view_start(index)
+        };
         self.pan_x = 0.0;
         self.pan_y = 0.0; // start new page centered
         self.top_offset = 0.0;
@@ -3321,7 +3570,10 @@ impl Reader {
         if let Some(focal) = focal
             && zoom0 > 0.0
         {
-            let center = (self.viewport.w.max(1) as f32 / 2.0, self.viewport.h.max(1) as f32 / 2.0);
+            let center = (
+                self.viewport.w.max(1) as f32 / 2.0,
+                self.viewport.h.max(1) as f32 / 2.0,
+            );
             // `from == to`: the focal point maps back to itself, i.e. a strict pin.
             let (px, py) = pan_about(focal, focal, center, pan0, self.zoom / zoom0);
             self.pan_x = px;
@@ -3437,8 +3689,16 @@ impl Reader {
         self.pan_y += dy;
         self.clamp_pan();
         let decay = (-SCROLL_FLING_FRICTION * dt).exp();
-        let vx = if dx.abs() > 0.5 && (self.pan_x - before.0).abs() < 0.5 { 0.0 } else { vx * decay };
-        let vy = if dy.abs() > 0.5 && (self.pan_y - before.1).abs() < 0.5 { 0.0 } else { vy * decay };
+        let vx = if dx.abs() > 0.5 && (self.pan_x - before.0).abs() < 0.5 {
+            0.0
+        } else {
+            vx * decay
+        };
+        let vy = if dy.abs() > 0.5 && (self.pan_y - before.1).abs() < 0.5 {
+            0.0
+        } else {
+            vy * decay
+        };
         self.pan_velocity = (vx, vy);
         self.pan_flinging()
     }

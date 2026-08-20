@@ -27,9 +27,10 @@ pub struct UiState {
     /// since stretching is what yosh has always done. Set each frame by the app.
     pub stretch_on: bool,
     /// Spine-shadow (two-page gutter shading) state, set each frame for the
-    /// Settings panel's toggle + strength slider.
+    /// Settings panel's toggle, strength slider, and width slider.
     pub spine_shadow_on: bool,
     pub spine_shadow_strength: f32,
+    pub spine_shadow_width: f32,
     /// Mouse-wheel scrolling speed (scroll mode) as a multiplier on the stock rate,
     /// set each frame for the Settings panel's slider.
     pub scroll_speed: f32,
@@ -66,11 +67,11 @@ pub struct UiState {
     pub req_toggle_transition: bool,
     /// "Stretch small pages" row click (key `Z` does the same thing).
     pub req_toggle_stretch: bool,
-    /// Spine-shadow toggle click / new strength from the panel's slider. Strength
-    /// applies live every change; the save is requested separately (drag end) so a
-    /// drag doesn't rewrite the config file once per frame.
+    /// Spine-shadow toggle click / new strength or width from panel sliders.
+    /// Values apply live; save waits for drag end so config isn't rewritten per frame.
     pub req_spine_toggle: bool,
     pub req_spine_strength: Option<f32>,
+    pub req_spine_width: Option<f32>,
     pub req_spine_save: bool,
     /// New mouse-wheel scrolling speed from the panel's slider, on the same
     /// apply-live / save-on-release split as the spine strength above.
@@ -1107,6 +1108,24 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
             );
             if r.changed() {
                 st.req_spine_strength = Some(strength);
+                if !r.dragged() {
+                    st.req_spine_save = true;
+                }
+            }
+            if r.drag_stopped() {
+                st.req_spine_save = true;
+            }
+
+            let mut width = st.spine_shadow_width;
+            let r = ui.add_enabled(
+                st.spine_shadow_on,
+                egui::Slider::new(&mut width, 0.25..=1.0)
+                    .step_by(0.05)
+                    .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                    .text("width (25–100%)"),
+            );
+            if r.changed() {
+                st.req_spine_width = Some(width);
                 if !r.dragged() {
                     st.req_spine_save = true;
                 }

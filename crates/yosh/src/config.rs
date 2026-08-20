@@ -162,6 +162,8 @@ pub struct Settings {
     pub spine_shadow_enabled: bool,
     /// Peak darkening at the seam, 0..1.
     pub spine_shadow_strength: f32,
+    /// Spine-shadow width relative to historical width, 25..100%.
+    pub spine_shadow_width: f32,
     /// Mouse-wheel scrolling speed in continuous-scroll mode: a multiplier on the
     /// stock 110 px per wheel line, so `1.0` is the historical feel (issue #9).
     /// Scales the **wheel only** — a finger drag is direct manipulation and stays
@@ -198,6 +200,7 @@ impl Default for Settings {
             no_stretch: false,              // stretch-to-fit, as yosh has always done
             spine_shadow_enabled: false,
             spine_shadow_strength: 0.55,
+            spine_shadow_width: 1.0,
             scroll_speed: 1.0, // the stock 110 px per wheel line
             // Dark by default on desktop (a backlit monitor); intentionally unlike the
             // Android shell, which defaults to System so e-ink panels get Light.
@@ -232,8 +235,7 @@ pub fn cache_dir() -> Option<PathBuf> {
     {
         return Some(dir.join("yosh-thumbs"));
     }
-    directories::ProjectDirs::from("", "the-database", "yosh")
-        .map(|d| d.cache_dir().join("thumbs"))
+    directories::ProjectDirs::from("", "the-database", "yosh").map(|d| d.cache_dir().join("thumbs"))
 }
 
 pub fn load() -> Settings {
@@ -284,10 +286,20 @@ mod tests {
         }"#;
         let s: Settings = serde_json::from_str(old).expect("old state.json must still parse");
         assert_eq!(s.perf, PerfPref::Auto, "missing perf defaults to Auto");
-        assert!(!s.spine_shadow_enabled, "missing spine shadow defaults to off");
+        assert!(
+            !s.spine_shadow_enabled,
+            "missing spine shadow defaults to off"
+        );
         assert_eq!(s.spine_shadow_strength, 0.55);
-        assert_eq!(s.scroll_speed, 1.0, "missing scroll speed keeps the stock wheel feel");
-        assert!(!s.no_stretch, "missing no-stretch defaults to off (stretch to fit)");
+        assert_eq!(s.spine_shadow_width, 1.0);
+        assert_eq!(
+            s.scroll_speed, 1.0,
+            "missing scroll speed keeps the stock wheel feel"
+        );
+        assert!(
+            !s.no_stretch,
+            "missing no-stretch defaults to off (stretch to fit)"
+        );
         // The keys that *were* present survive, so this isn't a silent reset.
         assert!(!s.direction_rtl);
         assert_eq!(s.fit, 2);

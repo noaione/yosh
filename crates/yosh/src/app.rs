@@ -907,6 +907,7 @@ impl ApplicationHandler for App {
         reader.transition_enabled = settings.page_transition_enabled;
         reader.fit_no_upscale = settings.no_stretch;
         reader.spine_strength = effective_spine(&settings);
+        reader.spine_width = settings.spine_shadow_width;
         reader.decode_options =
             effective_decode_options(settings.color_detection, settings.perf, on_battery);
         // Decode→UI wakeup: a worker that finishes a page schedules the frame that
@@ -3076,6 +3077,7 @@ impl State {
         self.ui.stretch_on = !self.settings.no_stretch;
         self.ui.spine_shadow_on = self.settings.spine_shadow_enabled;
         self.ui.spine_shadow_strength = self.settings.spine_shadow_strength;
+        self.ui.spine_shadow_width = self.settings.spine_shadow_width;
         self.ui.scroll_speed = self.settings.scroll_speed;
         self.ui.resume_on_startup = self.settings.resume_on_startup;
         self.ui.resume_start_at_first_page = self.settings.resume_start_at_first_page;
@@ -3473,6 +3475,11 @@ impl State {
         if let Some(v) = self.ui.req_spine_strength.take() {
             self.settings.spine_shadow_strength = v.clamp(0.0, 1.0);
             self.reader.spine_strength = effective_spine(&self.settings);
+            ui_acted = true;
+        }
+        if let Some(v) = self.ui.req_spine_width.take() {
+            self.settings.spine_shadow_width = v.clamp(0.25, 1.0);
+            self.reader.spine_width = self.settings.spine_shadow_width;
             ui_acted = true;
         }
         // Deferred config write: once per slider release, not once per drag frame.

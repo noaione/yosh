@@ -108,6 +108,7 @@ fn android_main(app: AndroidApp) {
         DEFAULT_SPINE_STRENGTH,
         false,
         ColorDetectionPref::Traditional,
+        DEFAULT_SPINE_WIDTH,
     ));
     let event_loop = EventLoop::builder()
         .with_android_app(app.clone())
@@ -181,6 +182,8 @@ const SAVE_DEBOUNCE: Duration = Duration::from_secs(2);
 
 /// Spine-shadow peak darkening when the user hasn't picked one (matches desktop).
 const DEFAULT_SPINE_STRENGTH: f32 = 0.55;
+/// Historical spine-shadow width. UI permits 25%, 50%, 75%, or 100% of this.
+const DEFAULT_SPINE_WIDTH: f32 = 1.0;
 
 /// Result of a background open: the comic's identity key (path or content:// URI)
 /// and its page source, or a message to log. The key travels *with* the result
@@ -453,10 +456,11 @@ struct App {
     layout_mode: LayoutMode,
     /// Reopen the last book on launch (persisted in view.txt; toggled in options).
     resume_on_startup: bool,
-    /// Book-gutter shading on un-joined two-page spreads, and its peak darkening
-    /// (persisted in view.txt; toggled in options). The reader takes the product.
+    /// Book-gutter shading on un-joined two-page spreads, its peak darkening, and
+    /// width (persisted in view.txt; toggled in options).
     spine_shadow_on: bool,
     spine_shadow_strength: f32,
+    spine_shadow_width: f32,
     /// Chrome theme preference (persisted in view.txt; toggled in options).
     theme: ThemePref,
     /// Performance profile (persisted in view.txt; toggled in options). Applied
@@ -998,12 +1002,13 @@ impl ApplicationHandler for Shell {
         reader.transition_enabled = self.init_view.3; // page-turn animation (persisted; default on)
         // No-upscale fit (persisted; default off = stretch small pages, as before).
         reader.fit_no_upscale = self.init_view.10;
-        // Spine shadow: the shell owns on/off × strength, the reader takes one number.
+        // Spine shadow: shell owns on/off × strength; width stays independent.
         reader.spine_strength = if self.init_view.8 {
             self.init_view.9
         } else {
             0.0
         };
+        reader.spine_width = self.init_view.12;
         // Landing decodes schedule their own frame from the worker thread; every
         // pool this reader builds inherits the callback.
         reader.set_waker(self.frame_waker.clone());
@@ -1068,6 +1073,7 @@ impl ApplicationHandler for Shell {
             resume_on_startup: self.init_view.5,
             spine_shadow_on: self.init_view.8,
             spine_shadow_strength: self.init_view.9,
+            spine_shadow_width: self.init_view.12,
             theme: self.init_view.6,
             perf,
             auto_tier,
@@ -1993,6 +1999,7 @@ impl Shell {
                 app.spine_shadow_strength,
                 app.reader.fit_no_upscale,
                 app.color_detection,
+                app.spine_shadow_width,
             );
         }
         if std::mem::take(&mut self.dirty_libroot)
@@ -2124,7 +2131,7 @@ fn attach_source(
 /// The persisted viewing options, in `view.txt`'s positional order: direction,
 /// layout mode, fit, page-turn animation, scroll mode, resume-on-startup, chrome
 /// theme, performance profile, spine shadow on/off, spine-shadow strength,
-/// no-upscale fit, color-page detection.
+/// no-upscale fit, color-page detection, spine-shadow width.
 type InitView = (
     Direction,
     LayoutMode,
@@ -2138,6 +2145,7 @@ type InitView = (
     f32,
     bool,
     ColorDetectionPref,
+    f32,
 );
 
 /// Load the persisted per-comic positions (one `index\tkey` line each).
@@ -2155,7 +2163,8 @@ fn load_view(path: &Path) -> InitView {
         PerfPref::Auto,
         ColorDetectionPref::Traditional,
     );
-    let (mut spine, mut spine_strength) = (false, DEFAULT_SPINE_STRENGTH);
+    let (mut spine, mut spine_strength, mut spine_width) =
+        (false, DEFAULT_SPINE_STRENGTH, DEFAULT_SPINE_WIDTH);
     let mut no_upscale = false;
     let mut color = ColorDetectionPref::Traditional;
     if let Ok(s) = std::fs::read_to_string(path) {
@@ -2197,6 +2206,12 @@ fn load_view(path: &Path) -> InitView {
         no_upscale = t.get(10) == Some(&"noupscale");
         // 12th slot: color-page detection; absent keeps historical behavior.
         color = ColorDetectionPref::parse(t.get(11));
+        // 13th slot: spine-shadow width as a whole percent; absent keeps 100%.
+        spine_width = t
+            .get(12)
+            .and_then(|v| v.parse::<i32>().ok())
+            .map(|p| p.clamp(25, 100) as f32 / 100.0)
+            .unwrap_or(DEFAULT_SPINE_WIDTH);
     }
     (
         dir,
@@ -2211,11 +2226,12 @@ fn load_view(path: &Path) -> InitView {
         spine_strength,
         no_upscale,
         color,
+        spine_width,
     )
 }
 
 /// Persist viewing options as
-/// "dir,layout,fit,anim,scroll,resume,theme,perf,spine,spine_strength,no_upscale,color".
+/// "dir,layout,fit,anim,scroll,resume,theme,perf,spine,spine_strength,no_upscale,color,spine_width".
 #[allow(clippy::too_many_arguments)]
 fn save_view(
     path: &Path,
@@ -2231,6 +2247,7 @@ fn save_view(
     spine_strength: f32,
     no_upscale: bool,
     color: ColorDetectionPref,
+    spine_width: f32,
 ) {
     let d = if dir == Direction::Rtl { "rtl" } else { "ltr" };
     let l = lay.label();
@@ -2249,9 +2266,10 @@ fn save_view(
     let ss = (spine_strength.clamp(0.0, 1.0) * 100.0).round() as i32;
     let nu = if no_upscale { "noupscale" } else { "stretch" };
     let c = color.label();
+    let sw = (spine_width.clamp(0.25, 1.0) * 100.0).round() as i32;
     write_atomic(
         path,
-        &format!("{d},{l},{f},{a},{s},{r},{t},{p},{sp},{ss},{nu},{c}"),
+        &format!("{d},{l},{f},{a},{s},{r},{t},{p},{sp},{ss},{nu},{c},{sw}"),
     );
 }
 
@@ -3119,6 +3137,7 @@ fn options_popup(
     transition_on: bool,
     spine_on: bool,
     spine_strength: f32,
+    spine_width: f32,
     resume_on: bool,
     scroll_on: bool,
     theme: ThemePref,
@@ -3133,6 +3152,7 @@ fn options_popup(
     set_transition: &mut Option<bool>,
     set_spine_on: &mut Option<bool>,
     set_spine_strength: &mut Option<f32>,
+    set_spine_width: &mut Option<f32>,
     set_resume: &mut Option<bool>,
     set_scroll: &mut Option<bool>,
     set_theme: &mut Option<ThemePref>,
@@ -3310,6 +3330,19 @@ fn options_popup(
                         .changed()
                     {
                         *set_spine_strength = Some(strength);
+                    }
+                    let mut width = spine_width;
+                    if ui
+                        .add_enabled(
+                            spine_on,
+                            egui::Slider::new(&mut width, 0.25..=1.0)
+                                .step_by(0.25)
+                                .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                                .text("width (25–100%)"),
+                        )
+                        .changed()
+                    {
+                        *set_spine_width = Some(width);
                     }
                 }
 
@@ -3979,6 +4012,7 @@ impl App {
         let cur_transition = self.reader.transition_enabled;
         let cur_spine_on = self.spine_shadow_on;
         let cur_spine_strength = self.spine_shadow_strength;
+        let cur_spine_width = self.spine_shadow_width;
         let cur_resume = self.resume_on_startup;
         let cur_scroll = self.reader.scroll_mode;
         let cur_theme = self.theme;
@@ -4117,6 +4151,7 @@ impl App {
         let mut set_transition: Option<bool> = None;
         let mut set_spine_on: Option<bool> = None;
         let mut set_spine_strength: Option<f32> = None;
+        let mut set_spine_width: Option<f32> = None;
         let mut set_resume: Option<bool> = None;
         let mut set_scroll: Option<bool> = None;
         let mut set_theme: Option<ThemePref> = None;
@@ -4391,6 +4426,7 @@ impl App {
                         cur_transition,
                         cur_spine_on,
                         cur_spine_strength,
+                        cur_spine_width,
                         cur_resume,
                         cur_scroll,
                         cur_theme,
@@ -4404,6 +4440,7 @@ impl App {
                         &mut set_transition,
                         &mut set_spine_on,
                         &mut set_spine_strength,
+                        &mut set_spine_width,
                         &mut set_resume,
                         &mut set_scroll,
                         &mut set_theme,
@@ -4566,6 +4603,12 @@ impl App {
             if self.spine_shadow_on {
                 self.reader.spine_strength = self.spine_shadow_strength;
             }
+            self.persist_view();
+            self.window.request_redraw();
+        }
+        if let Some(v) = set_spine_width {
+            self.spine_shadow_width = v.clamp(0.25, 1.0);
+            self.reader.spine_width = self.spine_shadow_width;
             self.persist_view();
             self.window.request_redraw();
         }
