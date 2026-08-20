@@ -24,7 +24,7 @@ use std::thread::JoinHandle;
 
 use unrar::Archive;
 
-use super::{is_image_name, PageSource};
+use super::{PageSource, is_image_name};
 
 /// How many pages *before* the resume hint pass 1 also extracts, so paging
 /// backwards off the resume point doesn't immediately stall on pass 2. Covers

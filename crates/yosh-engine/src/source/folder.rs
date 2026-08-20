@@ -4,7 +4,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::{is_image_ext, PageSource};
+use super::{PageSource, is_image_ext};
 
 pub struct FolderSource {
     paths: Vec<PathBuf>,
@@ -24,7 +24,11 @@ impl FolderSource {
                 // other types are dropped.
                 let ft = e.file_type().ok()?;
                 let p = e.path();
-                let is_file = if ft.is_symlink() { p.is_file() } else { ft.is_file() };
+                let is_file = if ft.is_symlink() {
+                    p.is_file()
+                } else {
+                    ft.is_file()
+                };
                 (is_file && is_image_ext(&p)).then_some(p)
             })
             .collect();

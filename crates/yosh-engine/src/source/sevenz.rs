@@ -30,7 +30,7 @@ use std::thread::JoinHandle;
 
 use sevenz_rust2::{Archive, BlockDecoder, Password};
 
-use super::{is_image_name, PageSource};
+use super::{PageSource, is_image_name};
 
 fn to_io<E: std::fmt::Display>(e: E) -> io::Error {
     io::Error::other(e.to_string())

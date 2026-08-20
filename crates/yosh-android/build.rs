@@ -11,7 +11,10 @@
 // Gated on android + the `rar` feature, so the host/desktop builds and the default
 // (RAR-free) Android build emit nothing and are untouched.
 fn main() {
-    let android = matches!(std::env::var("CARGO_CFG_TARGET_OS").as_deref(), Ok("android"));
+    let android = matches!(
+        std::env::var("CARGO_CFG_TARGET_OS").as_deref(),
+        Ok("android")
+    );
     let rar = std::env::var_os("CARGO_FEATURE_RAR").is_some();
     if android && rar {
         // libc++_static needs libc++abi (and libunwind, already linked by the target).

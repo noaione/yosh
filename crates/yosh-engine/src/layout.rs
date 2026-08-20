@@ -249,7 +249,12 @@ mod tests {
     }
 
     fn grid(len: usize, offset: usize, wide: &WideSet) -> Grid<'_> {
-        Grid { layout: Layout::Spread, len, offset, wide }
+        Grid {
+            layout: Layout::Spread,
+            len,
+            offset,
+            wide,
+        }
     }
 
     /// Walk forward from page 0, collecting the views in order.
@@ -290,7 +295,10 @@ mod tests {
     }
 
     fn pages(views: &[(usize, Option<usize>)]) -> Vec<usize> {
-        views.iter().flat_map(|&(a, b)| std::iter::once(a).chain(b)).collect()
+        views
+            .iter()
+            .flat_map(|&(a, b)| std::iter::once(a).chain(b))
+            .collect()
     }
 
     #[test]
@@ -338,13 +346,21 @@ mod tests {
                 let g = grid(len, offset, &w);
                 for i in 0..len {
                     let start = if i < l { i } else { l + ((i - l) / 2) * 2 };
-                    assert_eq!(g.view_start(i), start, "offset {offset}, len {len}, index {i}");
+                    assert_eq!(
+                        g.view_start(i),
+                        start,
+                        "offset {offset}, len {len}, index {i}"
+                    );
                     let want = if start < l || start + 1 >= len {
                         (start, None)
                     } else {
                         (start, Some(start + 1))
                     };
-                    assert_eq!(g.view_pages(i), want, "offset {offset}, len {len}, index {i}");
+                    assert_eq!(
+                        g.view_pages(i),
+                        want,
+                        "offset {offset}, len {len}, index {i}"
+                    );
                 }
             }
         }
@@ -362,9 +378,17 @@ mod tests {
                     let want = greedy(len, offset, &w);
                     // Every index maps to the view that contains it.
                     for &(a, b) in &want {
-                        assert_eq!(g.view_pages(a), (a, b), "len {len} mask {mask} off {offset}");
+                        assert_eq!(
+                            g.view_pages(a),
+                            (a, b),
+                            "len {len} mask {mask} off {offset}"
+                        );
                         if let Some(bi) = b {
-                            assert_eq!(g.view_pages(bi), (a, b), "len {len} mask {mask} off {offset}");
+                            assert_eq!(
+                                g.view_pages(bi),
+                                (a, b),
+                                "len {len} mask {mask} off {offset}"
+                            );
                         }
                     }
                     // …and walking forward reproduces the whole view list, so no page
@@ -386,7 +410,11 @@ mod tests {
                     let g = grid(len, offset, &w);
                     let mut a = 0;
                     loop {
-                        assert_eq!(g.view_start(a), a, "len {len} mask {mask}: {a} not an anchor");
+                        assert_eq!(
+                            g.view_start(a),
+                            a,
+                            "len {len} mask {mask}: {a} not an anchor"
+                        );
                         let n = g.next_view(a);
                         if n == a {
                             break;
@@ -401,7 +429,11 @@ mod tests {
                         back.push(g.view_pages(a));
                     }
                     back.reverse();
-                    assert_eq!(back, greedy(len, offset, &w), "len {len} mask {mask} off {offset}");
+                    assert_eq!(
+                        back,
+                        greedy(len, offset, &w),
+                        "len {len} mask {mask} off {offset}"
+                    );
                 }
             }
         }
@@ -462,15 +494,27 @@ mod tests {
     fn spread_wide_edges() {
         // A wide *cover* doesn't re-phase: page 0 is already alone at offset 0.
         let w = wides(&[0]);
-        assert_eq!(walk(&grid(5, 0, &w)), vec![(0, None), (1, Some(2)), (3, Some(4))]);
+        assert_eq!(
+            walk(&grid(5, 0, &w)),
+            vec![(0, None), (1, Some(2)), (3, Some(4))]
+        );
         // …but at offset 1 it is the grid's first slot, so it does.
-        assert_eq!(walk(&grid(4, 1, &w)), vec![(0, None), (1, Some(2)), (3, None)]);
+        assert_eq!(
+            walk(&grid(4, 1, &w)),
+            vec![(0, None), (1, Some(2)), (3, None)]
+        );
         // Two adjacent joined spreads.
         let w = wides(&[1, 2]);
-        assert_eq!(walk(&grid(5, 0, &w)), vec![(0, None), (1, None), (2, None), (3, Some(4))]);
+        assert_eq!(
+            walk(&grid(5, 0, &w)),
+            vec![(0, None), (1, None), (2, None), (3, Some(4))]
+        );
         // Joined spread as the last page.
         let w = wides(&[3]);
-        assert_eq!(walk(&grid(4, 0, &w)), vec![(0, None), (1, Some(2)), (3, None)]);
+        assert_eq!(
+            walk(&grid(4, 0, &w)),
+            vec![(0, None), (1, Some(2)), (3, None)]
+        );
         // Degenerate volumes.
         let w = wides(&[0]);
         let g = grid(1, 0, &w);
@@ -484,7 +528,12 @@ mod tests {
     #[test]
     fn single_layout_ignores_wide() {
         let w = wides(&[0, 3, 4]);
-        let g = Grid { layout: Layout::Single, len: 6, offset: 0, wide: &w };
+        let g = Grid {
+            layout: Layout::Single,
+            len: 6,
+            offset: 0,
+            wide: &w,
+        };
         for i in 0..6 {
             assert_eq!(g.view_pages(i), (i, None));
             assert_eq!(g.view_start(i), i);
@@ -509,7 +558,10 @@ mod tests {
         let w = wides(&[11]);
         let g = grid(19, 1, &w);
         assert!(!g.is_paired(10), "orphaned by a joined neighbour");
-        assert!(g.is_paired(9) && g.is_paired(8), "ordinary pairs are unaffected");
+        assert!(
+            g.is_paired(9) && g.is_paired(8),
+            "ordinary pairs are unaffected"
+        );
     }
 
     #[test]

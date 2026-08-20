@@ -158,10 +158,10 @@ struct Uniforms {
     scale: [f32; 2],
     offset: [f32; 2],
     gray: u32,
-    rotation: u32, // 0/1/2/3 = 0/90/180/270° CW (UV turn in the vertex shader)
-    alpha: f32,    // opacity multiplier (1.0 normally; < 1.0 for a fading flip overlay)
-    blur: f32,     // horizontal motion-blur smear half-width in UV (0.0 normally)
-    spine: f32,    // signed spine-shadow width in UV (>0 = right edge, <0 = left, 0.0 = off)
+    rotation: u32,       // 0/1/2/3 = 0/90/180/270° CW (UV turn in the vertex shader)
+    alpha: f32,          // opacity multiplier (1.0 normally; < 1.0 for a fading flip overlay)
+    blur: f32,           // horizontal motion-blur smear half-width in UV (0.0 normally)
+    spine: f32,          // signed spine-shadow width in UV (>0 = right edge, <0 = left, 0.0 = off)
     spine_strength: f32, // spine-shadow peak darkening, 0..1 (0.0 = off)
 }
 
@@ -285,7 +285,12 @@ impl PageTexture {
         drop(view);
         pool.put(texture, gray, w, h);
         if let Some(frames) = anim {
-            for AnimFrame { texture, view, delay_ms: _ } in frames {
+            for AnimFrame {
+                texture,
+                view,
+                delay_ms: _,
+            } in frames
+            {
                 drop(view);
                 // `.ico` layers differ in size, so key by each texture's own dims.
                 let (fw, fh) = (texture.width(), texture.height());
@@ -477,7 +482,11 @@ impl PagePipeline {
                 // its texture/view (PageTexture has no Drop, so the partial move
                 // is fine; the unused still-fields just drop).
                 let pt = Self::upload(device, queue, &img, pool, target_h);
-                AnimFrame { texture: pt.texture, view: pt.view, delay_ms }
+                AnimFrame {
+                    texture: pt.texture,
+                    view: pt.view,
+                    delay_ms,
+                }
             })
             .collect();
         base.anim = Some(anim);

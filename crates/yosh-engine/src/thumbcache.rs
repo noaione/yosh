@@ -62,7 +62,9 @@ fn load(cache_file: &Path) -> Option<DecodedImage> {
 /// is RGBA). Best-effort; a temp file + rename keeps a half-written file from being
 /// read as valid.
 fn store(cache_file: &Path, img: &DecodedImage) {
-    let Some(dir) = cache_file.parent() else { return };
+    let Some(dir) = cache_file.parent() else {
+        return;
+    };
     if std::fs::create_dir_all(dir).is_err() {
         return;
     }

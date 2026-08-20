@@ -6,9 +6,9 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use yosh_engine::i18n::tr;
-use yosh_engine::source::{is_image_ext, FolderSource, PageSource, ZipSource};
 use yosh_engine::page::PageTexture;
+use yosh_engine::i18n::tr;
+use yosh_engine::source::{FolderSource, PageSource, ZipSource, is_image_ext};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum VolKind {
@@ -79,7 +79,11 @@ impl Library {
             // The root itself is an image-folder comic: a one-volume "series".
             series.push(Series {
                 name: name_of(root),
-                volumes: vec![Volume::new(root.to_path_buf(), name_of(root), VolKind::Folder)],
+                volumes: vec![Volume::new(
+                    root.to_path_buf(),
+                    name_of(root),
+                    VolKind::Folder,
+                )],
                 dir: root.to_path_buf(),
             });
         }
@@ -322,11 +326,17 @@ mod tests {
 
         // A last-page entry but no progress → started (pre-tracking volume).
         last_pages.insert("a".into(), 3);
-        assert_eq!(vol_state(&progress, &last_pages, "a"), VolState::InProgress(0.0));
+        assert_eq!(
+            vol_state(&progress, &last_pages, "a"),
+            VolState::InProgress(0.0)
+        );
 
         // Partway through → InProgress with the read fraction.
         progress.insert("b".into(), (5, 10));
-        assert_eq!(vol_state(&progress, &last_pages, "b"), VolState::InProgress(0.5));
+        assert_eq!(
+            vol_state(&progress, &last_pages, "b"),
+            VolState::InProgress(0.5)
+        );
 
         // Furthest reached the total → Finished.
         progress.insert("c".into(), (10, 10));

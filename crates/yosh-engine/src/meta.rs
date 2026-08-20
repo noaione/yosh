@@ -87,7 +87,11 @@ pub fn probe(b: &[u8]) -> (u32, u32, String) {
                     4 => "CMYK",
                     _ => "?",
                 };
-                return (be16(i + 7), be16(i + 5), format!("JPEG · {}-bit {}", b[i + 4], kind));
+                return (
+                    be16(i + 7),
+                    be16(i + 5),
+                    format!("JPEG · {}-bit {}", b[i + 4], kind),
+                );
             }
             if i + 3 >= b.len() {
                 break;
@@ -131,7 +135,11 @@ pub fn probe(b: &[u8]) -> (u32, u32, String) {
                 mh = mh.max(dim(b[off + 1]));
             }
         }
-        return (mw, mh, format!("ICO · {count} layer{}", if count == 1 { "" } else { "s" }));
+        return (
+            mw,
+            mh,
+            format!("ICO · {count} layer{}", if count == 1 { "" } else { "s" }),
+        );
     }
     // BMP
     if b.len() >= 26 && &b[0..2] == b"BM" {
@@ -158,7 +166,11 @@ pub fn probe(b: &[u8]) -> (u32, u32, String) {
                         | (b[22] as u32) << 8
                         | (b[23] as u32) << 16
                         | (b[24] as u32) << 24;
-                    return ((bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1, "WebP".to_string());
+                    return (
+                        (bits & 0x3FFF) + 1,
+                        ((bits >> 14) & 0x3FFF) + 1,
+                        "WebP".to_string(),
+                    );
                 }
                 return (0, 0, "WebP".to_string());
             }
@@ -184,7 +196,11 @@ pub fn probe(b: &[u8]) -> (u32, u32, String) {
     // AVIF / HEIF (ISO-BMFF): walk the box tree to the `ispe` for dimensions.
     if b.len() >= 12 && &b[4..8] == b"ftyp" {
         let (w, h) = iso_box_dims(b).unwrap_or((0, 0));
-        let label = if matches!(&b[8..12], b"avif" | b"avis") { "AVIF" } else { "HEIF" };
+        let label = if matches!(&b[8..12], b"avif" | b"avis") {
+            "AVIF"
+        } else {
+            "HEIF"
+        };
         return (w, h, label.to_string());
     }
     // Generic fallback: let the `image` crate identify the format and read just the
@@ -229,7 +245,10 @@ mod tests {
             img.write_to(&mut buf, fmt).unwrap();
             let (w, h, label) = super::probe(&buf.into_inner());
             assert_eq!((w, h), (7, 4), "probe dims for {fmt:?}");
-            assert!(!label.is_empty() && label != "image", "probe label for {fmt:?}: {label}");
+            assert!(
+                !label.is_empty() && label != "image",
+                "probe label for {fmt:?}: {label}"
+            );
         }
     }
 }

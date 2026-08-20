@@ -23,7 +23,12 @@ impl Inner {
     /// Drop one pooled texture from any non-empty bucket. `false` ⇒ the pool was
     /// already empty (so an eviction loop must stop rather than spin).
     fn evict_one(&mut self) -> bool {
-        let Some(key) = self.buckets.iter().find(|(_, v)| !v.is_empty()).map(|(k, _)| *k) else {
+        let Some(key) = self
+            .buckets
+            .iter()
+            .find(|(_, v)| !v.is_empty())
+            .map(|(k, _)| *k)
+        else {
             return false;
         };
         if let Some(v) = self.buckets.get_mut(&key) {

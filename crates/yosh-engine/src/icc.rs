@@ -97,7 +97,9 @@ fn parse_desc(tag: &[u8]) -> Option<String> {
                 .map(|c| u16::from_be_bytes(*c))
                 .collect();
             let s = String::from_utf16_lossy(&u16s);
-            let s = s.trim_matches(|c: char| c == '\0' || c.is_whitespace()).to_string();
+            let s = s
+                .trim_matches(|c: char| c == '\0' || c.is_whitespace())
+                .to_string();
             (!s.is_empty()).then_some(s)
         }
         _ => None,
@@ -133,7 +135,7 @@ pub fn to_srgb_rgba(profile: &[u8], rgba: &mut [u8]) {
 /// `Transform::convert` panics on mismatched buffers.
 pub fn cmyk_to_srgb_rgb8(profile: &[u8], cmyk: &[u8], rgb: &mut [u8]) -> Result<(), String> {
     let n = cmyk.len() / 4;
-    if cmyk.len() % 4 != 0 {
+    if !cmyk.len().is_multiple_of(4) {
         return Err(format!(
             "cmyk icc: incomplete CMYK pixels ({} bytes)",
             cmyk.len()

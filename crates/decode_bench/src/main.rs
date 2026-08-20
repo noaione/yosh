@@ -64,8 +64,7 @@ fn is_gray_scan(pix: &[u8], ch: usize, t: i32) -> bool {
 }
 
 fn parse() -> Cfg {
-    const USAGE: &str =
-        "usage: decode_bench <folder> [--target-height H] [--decoder zune|png|both] \
+    const USAGE: &str = "usage: decode_bench <folder> [--target-height H] [--decoder zune|png|both] \
          [--resize on|off] [--quality bilinear|hq] [--threads N]";
     let mut a = std::env::args().skip(1);
     let mut folder = None;
@@ -152,10 +151,7 @@ fn main() {
     let mut files: Vec<PathBuf> = std::fs::read_dir(&cfg.folder)
         .expect("read_dir")
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("png"))
-        })
+        .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("png")))
         .collect();
     files.sort();
     assert!(!files.is_empty(), "no PNG files in {:?}", cfg.folder);
@@ -194,10 +190,7 @@ fn main() {
     for ((w, h), n) in &dims {
         print!("{w}x{h}={n} ");
     }
-    println!(
-        "  (avg {:.1} MP/page)",
-        full_mp_total / datas.len() as f64
-    );
+    println!("  (avg {:.1} MP/page)", full_mp_total / datas.len() as f64);
 
     let sweep: Vec<usize> = match cfg.threads {
         Some(n) => vec![n],

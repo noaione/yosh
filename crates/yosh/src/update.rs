@@ -35,7 +35,10 @@ pub fn check() -> Option<Update> {
         .into_string()
         .ok()?;
     let json: serde_json::Value = serde_json::from_str(&body).ok()?;
-    let latest = json["tag_name"].as_str()?.trim_start_matches('v').to_string();
+    let latest = json["tag_name"]
+        .as_str()?
+        .trim_start_matches('v')
+        .to_string();
     if !newer(&latest, env!("CARGO_PKG_VERSION")) {
         return None;
     }
@@ -45,7 +48,10 @@ pub fn check() -> Option<Update> {
         .find(|a| a["name"].as_str() == Some(ASSET))?["browser_download_url"]
         .as_str()?
         .to_string();
-    Some(Update { version: latest, download_url })
+    Some(Update {
+        version: latest,
+        download_url,
+    })
 }
 
 /// Download the new binary and replace the running exe in place. Blocking — call

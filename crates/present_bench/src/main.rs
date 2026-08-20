@@ -60,8 +60,7 @@ struct Cfg {
 }
 
 fn parse() -> Cfg {
-    const USAGE: &str =
-        "usage: present_bench <folder> [--mode immediate|mailbox|fifo|all] [--count 30] [--target-height 1440]";
+    const USAGE: &str = "usage: present_bench <folder> [--mode immediate|mailbox|fifo|all] [--count 30] [--target-height 1440]";
     let mut a = std::env::args().skip(1);
     let mut folder = None;
     let mut target_h = 1440u32;
@@ -186,7 +185,10 @@ impl Gpu {
         let size = window.inner_size();
         let caps = surface.get_capabilities(&adapter);
         let format = caps.formats[0];
-        println!("surface format: {format:?}   present modes available: {:?}", caps.present_modes);
+        println!(
+            "surface format: {format:?}   present modes available: {:?}",
+            caps.present_modes
+        );
 
         let want: Vec<wgpu::PresentMode> = match modes_arg {
             "immediate" => vec![wgpu::PresentMode::Immediate],
@@ -363,9 +365,8 @@ impl Gpu {
     /// Render one frame. Returns false when all phases are done.
     fn render(&mut self) -> bool {
         let frame = match self.surface.get_current_texture() {
-            wgpu::CurrentSurfaceTexture::Success(t) | wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
-                t
-            }
+            wgpu::CurrentSurfaceTexture::Success(t)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.device, &self.config);
                 return true;
@@ -457,22 +458,16 @@ impl ApplicationHandler for App {
         self.gpu = Some(Gpu::new(window, &self.pages, &self.modes_arg));
     }
 
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        _id: WindowId,
-        event: WindowEvent,
-    ) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         let Some(gpu) = self.gpu.as_mut() else {
             return;
         };
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(sz) => gpu.resize(sz.width, sz.height),
-            WindowEvent::RedrawRequested
-                if !gpu.render() => {
-                    event_loop.exit();
-                }
+            WindowEvent::RedrawRequested if !gpu.render() => {
+                event_loop.exit();
+            }
             _ => {}
         }
     }
