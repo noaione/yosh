@@ -5552,7 +5552,7 @@ dependencies = [
 
 [[package]]
 name = "yosh"
-version = "0.5.1"
+version = "0.5.1-nao.1"
 dependencies = [
  "directories",
  "egui",
