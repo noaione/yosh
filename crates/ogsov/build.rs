@@ -29,7 +29,11 @@ fn main() {
     let npz_path = match env::var_os("OGSOV_WEIGHTS_PATH") {
         Some(p) => {
             let p = PathBuf::from(p);
-            if p.is_absolute() { p } else { manifest_dir.join(p) }
+            if p.is_absolute() {
+                p
+            } else {
+                manifest_dir.join(p)
+            }
         }
         None => manifest_dir.join("ogsov_weights.npz"),
     };
@@ -49,7 +53,10 @@ fn main() {
         );
         match convert(&npz_path, &bin_path) {
             Ok(()) => true,
-            Err(e) => panic!("failed to convert OGSOV weights at {}: {e}", npz_path.display()),
+            Err(e) => panic!(
+                "failed to convert OGSOV weights at {}: {e}",
+                npz_path.display()
+            ),
         }
     } else {
         println!(
@@ -69,7 +76,10 @@ fn main() {
 
 type Zip = zip::ZipArchive<std::io::BufReader<fs::File>>;
 
-fn open_member(npz: &mut Zip, name: &str) -> Result<npyz::NpyFile<std::io::Cursor<Vec<u8>>>, Box<dyn std::error::Error>> {
+fn open_member(
+    npz: &mut Zip,
+    name: &str,
+) -> Result<npyz::NpyFile<std::io::Cursor<Vec<u8>>>, Box<dyn std::error::Error>> {
     use std::io::Read;
     let mut member = npz
         .by_name(&format!("{name}.npy"))
@@ -101,8 +111,18 @@ fn convert(npz_path: &Path, bin_path: &Path) -> Result<(), Box<dyn std::error::E
     // --- classifier weights ---
     for clf in 0..5 {
         for (layer, rows, cols) in LAYER_SHAPES {
-            append_f32s(&mut npz, &format!("{clf}.{layer}.weight"), &[rows as u64, cols as u64], &mut out)?;
-            append_f32s(&mut npz, &format!("{clf}.{layer}.bias"), &[rows as u64], &mut out)?;
+            append_f32s(
+                &mut npz,
+                &format!("{clf}.{layer}.weight"),
+                &[rows as u64, cols as u64],
+                &mut out,
+            )?;
+            append_f32s(
+                &mut npz,
+                &format!("{clf}.{layer}.bias"),
+                &[rows as u64],
+                &mut out,
+            )?;
         }
     }
 
@@ -113,7 +133,11 @@ fn convert(npz_path: &Path, bin_path: &Path) -> Result<(), Box<dyn std::error::E
 fn read_mask(npz: &mut Zip) -> Result<Vec<bool>, Box<dyn std::error::Error>> {
     let arr = open_member(npz, "mask_lookup")?;
     if arr.shape() != [256, 256, 256] {
-        return Err(format!("mask_lookup shape {:?}, expected [256,256,256]", arr.shape()).into());
+        return Err(format!(
+            "mask_lookup shape {:?}, expected [256,256,256]",
+            arr.shape()
+        )
+        .into());
     }
     if arr.order() != npyz::Order::C {
         return Err("mask_lookup is not C-order".into());
@@ -121,7 +145,9 @@ fn read_mask(npz: &mut Zip) -> Result<Vec<bool>, Box<dyn std::error::Error>> {
     // Stored dtype may be bool ('|b1') or an integer type — handle both.
     match arr.dtype() {
         npyz::DType::Plain(ty) if ty.to_string().ends_with("b1") => Ok(arr.into_vec::<bool>()?),
-        npyz::DType::Plain(ty) if ty.to_string().ends_with("u1") || ty.to_string().ends_with("i1") => {
+        npyz::DType::Plain(ty)
+            if ty.to_string().ends_with("u1") || ty.to_string().ends_with("i1") =>
+        {
             Ok(arr.into_vec::<u8>()?.into_iter().map(|v| v != 0).collect())
         }
         other => Err(format!("unsupported mask_lookup dtype: {other:?}").into()),
@@ -144,9 +170,11 @@ fn append_f32s(
     // Accept f32 or f64 (cast down).
     let values: Vec<f32> = match arr.dtype() {
         npyz::DType::Plain(ty) if ty.to_string().ends_with("f4") => arr.into_vec::<f32>()?,
-        npyz::DType::Plain(ty) if ty.to_string().ends_with("f8") => {
-            arr.into_vec::<f64>()?.into_iter().map(|v| v as f32).collect()
-        }
+        npyz::DType::Plain(ty) if ty.to_string().ends_with("f8") => arr
+            .into_vec::<f64>()?
+            .into_iter()
+            .map(|v| v as f32)
+            .collect(),
         other => return Err(format!("{name}: unsupported dtype {other:?}").into()),
     };
     out.reserve(values.len() * 4);

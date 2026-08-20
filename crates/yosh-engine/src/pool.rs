@@ -8,7 +8,7 @@
 
 use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use fast_image_resize::Resizer;
@@ -24,8 +24,15 @@ use crate::texpool::TexturePool;
 pub enum Msg {
     /// A finished page. `thumb` distinguishes a whole-volume LQ *thumbnail* (routes
     /// to the reader's `lq_cache`) from a normal window decode (routes to `cache`).
-    Done { index: usize, page: PageTexture, thumb: bool },
-    Failed { index: usize, error: String },
+    Done {
+        index: usize,
+        page: PageTexture,
+        thumb: bool,
+    },
+    Failed {
+        index: usize,
+        error: String,
+    },
 }
 
 /// A shell-supplied "there is something new to draw" callback, invoked from a
@@ -300,7 +307,13 @@ impl DecodePool {
                     // source under the same lock so a live `set_source` swap is
                     // picked up on the next claimed job. `claim` returning `None`
                     // *is* the wait condition — see its doc comment.
-                    let (index, th, lq, thumb, source): (usize, u32, bool, bool, Arc<dyn PageSource>) = {
+                    let (index, th, lq, thumb, source): (
+                        usize,
+                        u32,
+                        bool,
+                        bool,
+                        Arc<dyn PageSource>,
+                    ) = {
                         let (m, cv) = &*shared;
                         let mut st = lock_jobs(m);
                         loop {
@@ -325,7 +338,10 @@ impl DecodePool {
                             Ok(bytes) => bytes,
                             Err(e) => {
                                 drop_inflight(index, thumb);
-                                return Some(Msg::Failed { index, error: format!("read failed: {e}") });
+                                return Some(Msg::Failed {
+                                    index,
+                                    error: format!("read failed: {e}"),
+                                });
                             }
                         };
 
@@ -388,7 +404,10 @@ impl DecodePool {
                                 .map(|s| s.to_string())
                                 .or_else(|| panic.downcast_ref::<String>().cloned())
                                 .unwrap_or_else(|| "unknown panic".to_string());
-                            Msg::Failed { index, error: format!("decode panicked: {what}") }
+                            Msg::Failed {
+                                index,
+                                error: format!("decode panicked: {what}"),
+                            }
                         }
                     };
                     if tx.send(msg).is_err() {
@@ -411,7 +430,11 @@ impl DecodePool {
             });
         }
 
-        Self { shared, results: rx, wake_pending }
+        Self {
+            shared,
+            results: rx,
+            wake_pending,
+        }
     }
 
     /// Replace the work list with `desired` (`(index, target_h)`, nearest-first),
@@ -639,7 +662,10 @@ mod tests {
 
         assert_eq!(st.claim(true), Some((5, 900, false, false)));
         assert_eq!(st.claim(true), Some((6, 900, false, false)));
-        assert!(st.lq_tail.len() == 2, "tail untouched while the window had work");
+        assert!(
+            st.lq_tail.len() == 2,
+            "tail untouched while the window had work"
+        );
         // Window empty → the tail is finally eligible, as a thumb job.
         assert_eq!(st.claim(true), Some((40, 540, true, true)));
         // A window job arriving mid-fill jumps ahead of the rest of the tail again.
@@ -658,8 +684,15 @@ mod tests {
         st.lq_tail = VecDeque::from(vec![(40, 540), (41, 540)]);
 
         assert_eq!(st.claim(false), None, "reserved lane must ignore the tail");
-        assert_eq!(st.lq_tail.len(), 2, "a declined claim must not consume the tail");
-        assert!(st.thumbs_inflight.is_empty(), "and must not take a thumb slot");
+        assert_eq!(
+            st.lq_tail.len(),
+            2,
+            "a declined claim must not consume the tail"
+        );
+        assert!(
+            st.thumbs_inflight.is_empty(),
+            "and must not take a thumb slot"
+        );
 
         // The HQ window is still its job, and it takes it ahead of any tail entry.
         st.jobs.push_back((5, 900, false, false));
@@ -683,7 +716,10 @@ mod tests {
         // 41 is skipped *and* consumed, so the next claim is 42, not 41.
         assert_eq!(st.claim(true), Some((42, 540, true, true)));
         assert!(st.lq_tail.is_empty());
-        assert!(st.lq_cancel.is_empty(), "a consumed cancel is dropped with its entry");
+        assert!(
+            st.lq_cancel.is_empty(),
+            "a consumed cancel is dropped with its entry"
+        );
 
         // Every entry cancelled → nothing claimable (the worker waits), and the
         // tail is drained rather than re-walked on every claim.
@@ -712,9 +748,17 @@ mod tests {
                 claimed.push(i);
             }
         }
-        assert_eq!(claimed, vec![0, 1], "at most {LQ_CONCURRENCY} thumbs in flight");
+        assert_eq!(
+            claimed,
+            vec![0, 1],
+            "at most {LQ_CONCURRENCY} thumbs in flight"
+        );
         assert_eq!(st.claim(true), None, "slots full → the worker must wait");
-        assert_eq!(st.lq_tail.len(), 8, "a blocked claim must not consume the tail");
+        assert_eq!(
+            st.lq_tail.len(),
+            8,
+            "a blocked claim must not consume the tail"
+        );
 
         // A thumb finishes (worker: `drop_inflight` → remove + notify_one).
         st.thumbs_inflight.remove(&0);
@@ -737,7 +781,10 @@ mod tests {
         let mut st = job_state();
         st.lq_tail = VecDeque::from(vec![(40, 540)]);
         assert_eq!(st.claim(true), Some((40, 540, true, true)));
-        assert!(!st.inflight.contains(&40), "a thumb must not claim the inflight slot");
+        assert!(
+            !st.inflight.contains(&40),
+            "a thumb must not claim the inflight slot"
+        );
         assert!(st.thumbs_inflight.contains(&40));
 
         // The reader jumps to 40: the window job survives `set_jobs`' inflight
@@ -749,7 +796,10 @@ mod tests {
 
         // …and the thumb finishing must not clear the HQ decode's marker.
         st.thumbs_inflight.remove(&40);
-        assert!(st.inflight.contains(&40), "thumb release must not free the HQ marker");
+        assert!(
+            st.inflight.contains(&40),
+            "thumb release must not free the HQ marker"
+        );
     }
 
     /// A rebuilt tail can list a page whose thumb is still decoding (it isn't in
@@ -760,7 +810,11 @@ mod tests {
         let mut st = job_state();
         st.lq_tail = VecDeque::from(vec![(40, 540), (40, 540), (41, 540)]);
         assert_eq!(st.claim(true), Some((40, 540, true, true)));
-        assert_eq!(st.claim(true), Some((41, 540, true, true)), "duplicate 40 skipped");
+        assert_eq!(
+            st.claim(true),
+            Some((41, 540, true, true)),
+            "duplicate 40 skipped"
+        );
         assert_eq!(st.thumbs_inflight.len(), 2);
     }
 
@@ -808,8 +862,14 @@ mod tests {
         st.paused = true;
         assert!(st.stale(5, false), "parked: the window decode bails");
         assert!(st.stale(40, true), "parked: the thumb bails too");
-        assert!(st.inflight.is_empty(), "abandoning must free the inflight marker");
-        assert!(st.thumbs_inflight.is_empty(), "…and the thumb concurrency slot");
+        assert!(
+            st.inflight.is_empty(),
+            "abandoning must free the inflight marker"
+        );
+        assert!(
+            st.thumbs_inflight.is_empty(),
+            "…and the thumb concurrency slot"
+        );
 
         // Both markers freed ⇒ after the unpark the pages are claimable again.
         st.paused = false;
@@ -831,7 +891,10 @@ mod tests {
 
         assert!(!st.stale(5, false), "still in the window");
         assert!(st.stale(9, false), "jumped away → abandon");
-        assert!(!st.inflight.contains(&9), "and release it for a later re-queue");
+        assert!(
+            !st.inflight.contains(&9),
+            "and release it for a later re-queue"
+        );
         assert!(st.inflight.contains(&5));
         assert!(!st.stale(40, true), "a thumb outlives any navigation");
         assert!(st.thumbs_inflight.contains(&40));
@@ -876,6 +939,10 @@ mod tests {
         for h in handles {
             h.join().unwrap();
         }
-        assert_eq!(woke.load(Ordering::Relaxed), 1, "exactly one wake per burst");
+        assert_eq!(
+            woke.load(Ordering::Relaxed),
+            1,
+            "exactly one wake per burst"
+        );
     }
 }

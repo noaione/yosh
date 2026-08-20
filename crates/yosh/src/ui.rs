@@ -940,12 +940,10 @@ fn page_jump_window(ctx: &egui::Context, st: &mut UiState) {
             });
         });
 
-    if submit {
-        if let Ok(page) = st.jump_text.trim().parse::<usize>() {
-            let page = page.clamp(1, st.seek_total);
-            st.req_jump_page = Some(page - 1);
-            open = false;
-        }
+    if submit && let Ok(page) = st.jump_text.trim().parse::<usize>() {
+        let page = page.clamp(1, st.seek_total);
+        st.req_jump_page = Some(page - 1);
+        open = false;
     }
     st.jump_open = open;
 }

@@ -90,9 +90,28 @@ pub fn is_image_ext(p: &Path) -> bool {
             // Decoded by dedicated crates or the `image`-crate fallback. The
             // tif/tga/dds/exr/hdr/qoi/pnm group is decoded by the `image` crate's
             // default (pure-Rust) format set — they only need to be listed here.
-            "png" | "jpg" | "jpeg" | "jpe" | "webp" | "gif" | "bmp" | "avif" | "jxl" | "psd"
-                | "ico" | "tif" | "tiff" | "tga" | "dds" | "exr" | "hdr" | "qoi" | "pnm" | "ppm"
-                | "pgm" | "pbm",
+            "png"
+                | "jpg"
+                | "jpeg"
+                | "jpe"
+                | "webp"
+                | "gif"
+                | "bmp"
+                | "avif"
+                | "jxl"
+                | "psd"
+                | "ico"
+                | "tif"
+                | "tiff"
+                | "tga"
+                | "dds"
+                | "exr"
+                | "hdr"
+                | "qoi"
+                | "pnm"
+                | "ppm"
+                | "pgm"
+                | "pbm",
         )
     )
 }

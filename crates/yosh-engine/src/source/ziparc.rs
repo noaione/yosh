@@ -20,7 +20,7 @@ use std::sync::{Arc, Mutex};
 
 use zip::ZipArchive;
 
-use super::{decode_entry_name, detect_legacy_encoding, is_image_name, PageSource};
+use super::{PageSource, decode_entry_name, detect_legacy_encoding, is_image_name};
 
 /// Idle parsed-archive handles kept for reuse. Bounded to roughly the decode
 /// worker count — only idle handles are capped, so a drift from that just costs a
@@ -332,7 +332,9 @@ impl PageSource for ZipSource {
             Index::Local(offsets) => {
                 let mut reader = Self::fresh(&self.backend).ok()?;
                 reader.seek(SeekFrom::Start(*offsets.get(index)?)).ok()?;
-                zip::read::read_zipfile_from_stream(&mut reader).ok()??.last_modified()
+                zip::read::read_zipfile_from_stream(&mut reader)
+                    .ok()??
+                    .last_modified()
             }
         };
         dt.map(|dt| {
@@ -358,13 +360,14 @@ mod tests {
     use crate::source::PageSource;
     use std::io::Write as _;
     use std::sync::Arc;
-    use zip::write::SimpleFileOptions;
     use zip::DateTime;
+    use zip::write::SimpleFileOptions;
 
     /// Build a temp zip from `(name, bytes)` entries plus any directory entries,
     /// returning its path. `tag` keeps concurrent tests from colliding.
     fn write_zip(tag: &str, files: &[(&str, &[u8])], dirs: &[&str]) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("yosh_zip_{}_{}.zip", std::process::id(), tag));
+        let path =
+            std::env::temp_dir().join(format!("yosh_zip_{}_{}.zip", std::process::id(), tag));
         let f = File::create(&path).unwrap();
         let mut w = zip::ZipWriter::new(f);
         let opts = SimpleFileOptions::default();
@@ -462,7 +465,10 @@ mod tests {
     #[test]
     fn reads_and_names_legacy_encodings() {
         let cases: &[(&'static encoding_rs::Encoding, &str)] = &[
-            (encoding_rs::SHIFT_JIS, "週刊少年ジャンプ 2026年37・38号/001.jpg"),
+            (
+                encoding_rs::SHIFT_JIS,
+                "週刊少年ジャンプ 2026年37・38号/001.jpg",
+            ),
             (encoding_rs::EUC_JP, "週刊少年ジャンプ/001.jpg"),
             (encoding_rs::GBK, "海贼王 第100话/001.jpg"),
             (encoding_rs::BIG5, "海賊王 第100話/001.jpg"),
@@ -592,7 +598,11 @@ mod tests {
                 let src = src.clone();
                 std::thread::spawn(move || {
                     for _ in 0..50 {
-                        let want: &[u8] = if t % 2 == 0 { b"PNGDATA-ONE" } else { b"JPGDATA-TWO" };
+                        let want: &[u8] = if t % 2 == 0 {
+                            b"PNGDATA-ONE"
+                        } else {
+                            b"JPGDATA-TWO"
+                        };
                         assert_eq!(*src.read_page(t % 2).unwrap(), want);
                     }
                 })
@@ -606,8 +616,8 @@ mod tests {
 
     #[test]
     fn modified_is_formatted() {
-        let path = std::env::temp_dir()
-            .join(format!("yosh_zip_{}_modified.zip", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("yosh_zip_{}_modified.zip", std::process::id()));
         {
             let f = File::create(&path).unwrap();
             let mut w = zip::ZipWriter::new(f);
@@ -628,7 +638,8 @@ mod tests {
         let mut buf = Vec::new();
         {
             let mut w = zip::ZipWriter::new(Cursor::new(&mut buf));
-            let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            let opts =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
             for (n, d) in [
                 ("01.png", b"PAGE-ONE".as_slice()),
                 ("02.png", b"PAGE-TWO"),

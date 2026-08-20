@@ -22,7 +22,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
-use crate::reader::{drag_commits, drag_dir, pan_about, Reader};
+use crate::reader::{Reader, drag_commits, drag_dir, pan_about};
 
 /// A touch landing within this window after a drag release is the digitizer's
 /// lift-off bounce (a phantom contact as the finger peels off the glass), not
@@ -253,7 +253,10 @@ impl TouchGestures {
         if !reader.flinging() && !reader.pan_flinging() {
             return false;
         }
-        let dt = now.duration_since(self.last_fling_tick).as_secs_f32().clamp(0.0, TICK_DT_MAX);
+        let dt = now
+            .duration_since(self.last_fling_tick)
+            .as_secs_f32()
+            .clamp(0.0, TICK_DT_MAX);
         self.last_fling_tick = now;
         // Both are evaluated, never short-circuited: a diagonal throw in a zoomed
         // strip runs a scroll glide *and* a pan glide, and each has to be ticked.
@@ -404,7 +407,9 @@ impl TouchGestures {
                         // (micro-jitter pans invisibly, so taps survive the release's
                         // radius test); the lock only marks the gesture as a real pan,
                         // deciding fling-vs-tap at release.
-                        if !self.pan_drag && let Some((sx, sy)) = self.gesture_start {
+                        if !self.pan_drag
+                            && let Some((sx, sy)) = self.gesture_start
+                        {
                             let w = ctx.surface_w;
                             let h = ctx.surface_h;
                             self.pan_drag = (x - sx).abs() > w * LOCK_FRAC_W
@@ -453,8 +458,7 @@ impl TouchGestures {
                             // is clearly horizontal, so taps and the seekbar stay intact.
                             if !self.page_drag {
                                 let w = ctx.surface_w;
-                                self.page_drag =
-                                    dx.abs() > w * LOCK_FRAC_W && dx.abs() > dy.abs();
+                                self.page_drag = dx.abs() > w * LOCK_FRAC_W && dx.abs() > dy.abs();
                             }
                             if self.page_drag {
                                 self.samples.push(now, x, y);
@@ -549,8 +553,8 @@ impl TouchGestures {
                         // interactive drag long before reaching here, so flipping by
                         // swipe is handled by `drag_release` above.
                         let w = ctx.surface_w;
-                        let micro = (x - sx).abs() < w * LOCK_FRAC_W
-                            && (y - sy).abs() < w * LOCK_FRAC_W;
+                        let micro =
+                            (x - sx).abs() < w * LOCK_FRAC_W && (y - sy).abs() < w * LOCK_FRAC_W;
                         if let Some((t0, v, (pvx, pvy))) = self.caught_fling.take() {
                             // The contact landed moments after a drag release (see
                             // Phase::Start): a micro-contact that lifts right off again
@@ -634,7 +638,10 @@ mod tests {
         r.source = Some(Arc::new(NamesSource(
             (0..pages).map(|i| format!("{i:03}.png")).collect(),
         )));
-        r.viewport = Viewport { w: W as u32, h: H as u32 };
+        r.viewport = Viewport {
+            w: W as u32,
+            h: H as u32,
+        };
         r
     }
 
@@ -677,8 +684,17 @@ mod tests {
         g.on_touch(&mut r, &c, Phase::Start, 2, 500.0, 1000.0, ms(t0, 500));
         g.on_touch(&mut r, &c, Phase::Move, 2, 505.0, 1004.0, ms(t0, 510));
         let up = g.on_touch(&mut r, &c, Phase::End, 2, 505.0, 1004.0, ms(t0, 520));
-        assert_eq!(up.events, vec![GestureEvent::Tap { x: 500.0, y: 1000.0 }]);
-        assert!(!up.redraw, "a tap leaves the redraw to the shell's tap handler");
+        assert_eq!(
+            up.events,
+            vec![GestureEvent::Tap {
+                x: 500.0,
+                y: 1000.0
+            }]
+        );
+        assert!(
+            !up.redraw,
+            "a tap leaves the redraw to the shell's tap handler"
+        );
     }
 
     // --- 2. zoomed-scroll routing -------------------------------------------
@@ -776,9 +792,7 @@ mod tests {
     // A press that lingers past the re-arm window, or that travels, is a real grab.
     #[test]
     fn lingering_or_travelled_contact_keeps_the_glide_caught() {
-        for (label, lift_at, x) in
-            [("lingered", 200u64, 500.0f64), ("travelled", 30, 700.0)]
-        {
+        for (label, lift_at, x) in [("lingered", 200u64, 500.0f64), ("travelled", 30, 700.0)] {
             let mut r = test_reader(true, 10);
             let mut g = TouchGestures::new();
             let c = ctx();
@@ -811,17 +825,32 @@ mod tests {
         // 100 ms later: still inside the window → suppressed.
         g.on_touch(&mut r, &c, Phase::Start, 2, 200.0, 1000.0, ms(t0, 132));
         let early = g.on_touch(&mut r, &c, Phase::End, 2, 200.0, 1000.0, ms(t0, 140));
-        assert!(early.events.is_empty(), "a bounce-window tap is digitizer noise");
+        assert!(
+            early.events.is_empty(),
+            "a bounce-window tap is digitizer noise"
+        );
 
         // 200 ms later: outside it → a real tap.
         g.on_touch(&mut r, &c, Phase::Start, 3, 200.0, 1000.0, ms(t0, 240));
         let late = g.on_touch(&mut r, &c, Phase::End, 3, 200.0, 1000.0, ms(t0, 248));
-        assert_eq!(late.events, vec![GestureEvent::Tap { x: 200.0, y: 1000.0 }]);
+        assert_eq!(
+            late.events,
+            vec![GestureEvent::Tap {
+                x: 200.0,
+                y: 1000.0
+            }]
+        );
 
         // Immediately again: a tap's own release never armed the guard.
         g.on_touch(&mut r, &c, Phase::Start, 4, 200.0, 1000.0, ms(t0, 260));
         let again = g.on_touch(&mut r, &c, Phase::End, 4, 200.0, 1000.0, ms(t0, 268));
-        assert_eq!(again.events, vec![GestureEvent::Tap { x: 200.0, y: 1000.0 }]);
+        assert_eq!(
+            again.events,
+            vec![GestureEvent::Tap {
+                x: 200.0,
+                y: 1000.0
+            }]
+        );
     }
 
     // --- 6. flip / boundary events ------------------------------------------

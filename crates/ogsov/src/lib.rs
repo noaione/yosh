@@ -13,7 +13,10 @@ pub fn embedded_model() -> Option<&'static detect::Ogsov> {
     MODEL
         .get_or_init(|| {
             if OGSOV_EMBEDDED {
-                Some(detect::Ogsov::from_bytes(EMBEDDED_WEIGHTS).expect("embedded OGSOV weights are malformed"))
+                Some(
+                    detect::Ogsov::from_bytes(EMBEDDED_WEIGHTS)
+                        .expect("embedded OGSOV weights are malformed"),
+                )
             } else {
                 None
             }

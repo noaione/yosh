@@ -230,7 +230,11 @@ impl Ogsov {
             p75.floor() as usize,
             p75.ceil() as usize,
             m / 2,
-            if m % 2 == 0 { m / 2 - 1 } else { m / 2 },
+            if m.is_multiple_of(2) {
+                m / 2 - 1
+            } else {
+                m / 2
+            },
         ];
         need.sort_unstable();
         need.dedup();

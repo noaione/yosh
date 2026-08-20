@@ -14,7 +14,7 @@ use std::thread::JoinHandle;
 
 use unrar::Archive;
 
-use super::{is_image_name, PageSource};
+use super::{PageSource, is_image_name};
 
 struct Ready {
     map: HashMap<usize, Arc<Vec<u8>>>,

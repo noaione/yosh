@@ -114,7 +114,9 @@ fn target_dims(w: u32, h: u32, target_h: u32) -> (u32, u32) {
 fn check_fits(tw: u32, th: u32) -> Result<(), String> {
     let max = MAX_TEX_DIM.load(Ordering::Relaxed);
     if tw > max || th > max {
-        Err(format!("image too large for the GPU ({tw}x{th}; max {max} px per side)"))
+        Err(format!(
+            "image too large for the GPU ({tw}x{th}; max {max} px per side)"
+        ))
     } else {
         Ok(())
     }
@@ -520,8 +522,9 @@ pub fn to_rgba_image(img: DecodedImage) -> DecodedImage {
 /// JPEG XL signature: either a bare codestream (`FF 0A`) or the ISOBMFF
 /// container's 12-byte JXL box (`\0\0\0\x0C JXL \r \n \x87 \n`).
 fn is_jxl(bytes: &[u8]) -> bool {
-    const JXL_BOX: [u8; 12] =
-        [0x00, 0x00, 0x00, 0x0C, 0x4A, 0x58, 0x4C, 0x20, 0x0D, 0x0A, 0x87, 0x0A];
+    const JXL_BOX: [u8; 12] = [
+        0x00, 0x00, 0x00, 0x0C, 0x4A, 0x58, 0x4C, 0x20, 0x0D, 0x0A, 0x87, 0x0A,
+    ];
     bytes.starts_with(&[0xFF, 0x0A]) || bytes.starts_with(&JXL_BOX)
 }
 
@@ -563,7 +566,8 @@ fn decode_jpeg_scaled(bytes: &[u8], target_h: u32) -> Result<(Decoded, (u32, u32
         // target: `choose_idct_size` matches on *either* axis, so an aspect-correct
         // request is what makes it land on the scale computed above.
         let req = |v: u32| v.saturating_mul(s).div_ceil(8).clamp(1, u16::MAX as u32) as u16;
-        d.scale(req(src_w), req(src_h)).map_err(|e| format!("jpeg scale: {e}"))?;
+        d.scale(req(src_w), req(src_h))
+            .map_err(|e| format!("jpeg scale: {e}"))?;
     }
     let pixels = d.decode().map_err(|e| format!("jpeg decode: {e}"))?;
     let info = d.info().ok_or("jpeg: no info")?; // output size (post-scale)
@@ -840,9 +844,12 @@ pub fn decode_and_downscale_with_options(
     // to RGB, so the profile no longer describes the buffer.
     if !gray_by_channels
         && let Some(p) = &profile
-            && !icc::is_srgb(p) && !icc::is_gray(p) && !icc::is_cmyk(p) {
-                icc::to_srgb_rgba(p, &mut full);
-            }
+        && !icc::is_srgb(p)
+        && !icc::is_gray(p)
+        && !icc::is_cmyk(p)
+    {
+        icc::to_srgb_rgba(p, &mut full);
+    }
     // Decoded size = scale to the display height (never upscaling past the source).
     // A page bigger than one GPU texture is rejected (full res is preserved up to
     // the limit; we don't silently downscale a 16k-px image to a blurry one).
@@ -924,7 +931,16 @@ fn decode_and_downscale_lq(
     let (tw, th) = target_dims(w, h, target_h);
     check_fits(tw, th)?;
     let mut img = if tw == w && th == h {
-        DecodedImage { w, h, src_w: w, src_h: h, gray: gray_by_channels, path: ResizePath::None, color_detection: ColorDetectionOutcome::NotRun, pixels: full }
+        DecodedImage {
+            w,
+            h,
+            src_w: w,
+            src_h: h,
+            gray: gray_by_channels,
+            path: ResizePath::None,
+            color_detection: ColorDetectionOutcome::NotRun,
+            pixels: full,
+        }
     } else if gray_by_channels {
         downscale_gray_fast(&full, w, h, tw, th, resizer)?
     } else {
@@ -1001,7 +1017,10 @@ fn frames_to_page(
         let delay = if ms < 20 { 100 } else { ms };
         let buf = frame.into_buffer(); // RgbaImage, full canvas
         let (w, h) = buf.dimensions();
-        out.push((downscale_rgba_frame(buf.into_raw(), w, h, target_h, resizer)?, delay));
+        out.push((
+            downscale_rgba_frame(buf.into_raw(), w, h, target_h, resizer)?,
+            delay,
+        ));
     }
     if out.len() == 1 {
         Ok(DecodedPage::Still(out.pop().unwrap().0))
@@ -1084,16 +1103,18 @@ pub fn decode_page_with_options(
     }
     // WebP: frame-decode only when it's actually animated; a static WebP takes the
     // normal still path (with ICC color management) like any other image.
-    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP"
+    if bytes.len() >= 12
+        && &bytes[0..4] == b"RIFF"
+        && &bytes[8..12] == b"WEBP"
         && let Ok(dec) = WebPDecoder::new(std::io::Cursor::new(bytes))
-            && dec.has_animation()
-        {
-            let frames = dec
-                .into_frames()
-                .collect_frames()
-                .map_err(|e| format!("webp frames: {e}"))?;
-            return frames_to_page(frames, target_h, resizer);
-        }
+        && dec.has_animation()
+    {
+        let frames = dec
+            .into_frames()
+            .collect_frames()
+            .map_err(|e| format!("webp frames: {e}"))?;
+        return frames_to_page(frames, target_h, resizer);
+    }
     // Stills: the seek hot path. LQ uses the fast gamma-space resize; HQ is the
     // unchanged linear-light pipeline. (Animations/ICO above always decode HQ —
     // rare, and not the seek bottleneck.)
@@ -1277,7 +1298,10 @@ mod tests {
                 // And it is the *smallest* such scale (no wasted IDCT work).
                 if s > 1 {
                     let smaller = src_h.saturating_mul(s / 2).div_ceil(8);
-                    assert!(smaller < target, "src {src_h} → {target}: {s}/8 is bigger than needed");
+                    assert!(
+                        smaller < target,
+                        "src {src_h} → {target}: {s}/8 is bigger than needed"
+                    );
                 }
             }
         }
@@ -1298,9 +1322,16 @@ mod tests {
         match decode_page(&bytes, 4, false, &mut resizer).unwrap() {
             DecodedPage::Animated(fs) => {
                 assert_eq!(fs.len(), 2, "both frames preserved");
-                assert!(fs.iter().all(|(img, _)| img.w == 4 && img.h == 4 && !img.gray));
+                assert!(
+                    fs.iter()
+                        .all(|(img, _)| img.w == 4 && img.h == 4 && !img.gray)
+                );
                 // 100ms round-trips through the centisecond GIF delay field.
-                assert!(fs.iter().all(|(_, d)| *d == 100), "delays = {:?}", fs.iter().map(|(_, d)| *d).collect::<Vec<_>>());
+                assert!(
+                    fs.iter().all(|(_, d)| *d == 100),
+                    "delays = {:?}",
+                    fs.iter().map(|(_, d)| *d).collect::<Vec<_>>()
+                );
             }
             _ => panic!("expected an animation"),
         }
@@ -1778,8 +1809,8 @@ mod tests {
         // red (the flat color) gets a tight bound.
         assert!(
             (opaque[0] as i32 - 255).abs() <= 8
-                && (opaque[1] as i32 - 0).abs() <= 8
-                && (opaque[2] as i32 - 0).abs() <= 32
+                && (opaque[1] as i32).abs() <= 8
+                && (opaque[2] as i32).abs() <= 32
                 && opaque[3] == 255,
             "opaque red, alpha intact: {opaque:?}"
         );
