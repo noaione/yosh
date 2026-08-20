@@ -684,6 +684,9 @@ pub fn chrome(
             .resizable(false)
             .open(&mut st.help_open)
             .show(ctx, |ui| {
+                // Help is read-only reference text; dragging it must not leave a
+                // persistent text-selection highlight behind.
+                ui.style_mut().interaction.selectable_labels = false;
                 ui.label(
                     egui::RichText::new(concat!("yosh ", env!("CARGO_PKG_VERSION")))
                         .color(egui::Color32::from_gray(140)),
@@ -962,6 +965,10 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
         .resizable(false)
         .open(&mut open)
         .show(ctx, |ui| {
+            // Settings is a control surface, not copyable document text. Leaving
+            // label selection on here lets a drag keep a text-selection highlight
+            // alive across the panel; option buttons still show their active value.
+            ui.style_mut().interaction.selectable_labels = false;
             ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
 
             ui.label(egui::RichText::new("Reading mode").strong());
