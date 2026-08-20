@@ -260,6 +260,7 @@ pub static DE: Strings = Strings {
     layout_auto_hint: "Hochformat: Einzelseite, Querformat: Doppelseite — zum Wechseln das Gerät drehen.",
     stretch_hint: "Aus: Einpassen geht nie über 100 % nativ (Zoom schon).",
     spine_shadow: "Bundschatten",
+    spine_shadow_width: "Breite (25–100 %)",
     vol_keys: "Mit den Lautstärketasten umblättern",
     vol_down_next: "Leiser = weiter",
     vol_up_next: "Lauter = weiter",

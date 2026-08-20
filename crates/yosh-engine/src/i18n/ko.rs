@@ -260,6 +260,7 @@ pub static KO: Strings = Strings {
     layout_auto_hint: "세로는 한 쪽, 가로는 두 쪽 — 기기를 돌려 전환합니다.",
     stretch_hint: "끄기: 맞춤이 원본 100%를 넘지 않음 (확대/축소는 가능).",
     spine_shadow: "제본 그림자",
+    spine_shadow_width: "너비 (25–100%)",
     vol_keys: "음량 키로 페이지 넘기기",
     vol_down_next: "아래 = 다음",
     vol_up_next: "위 = 다음",

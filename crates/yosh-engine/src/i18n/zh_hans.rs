@@ -260,6 +260,7 @@ pub static ZH_HANS: Strings = Strings {
     layout_auto_hint: "竖屏单页，横屏双页 — 旋转设备即可切换。",
     stretch_hint: "关: 适应时不超过原始 100%（仍可缩放）。",
     spine_shadow: "书脊阴影",
+    spine_shadow_width: "宽度 (25–100%)",
     vol_keys: "音量键翻页",
     vol_down_next: "下 = 下一页",
     vol_up_next: "上 = 下一页",

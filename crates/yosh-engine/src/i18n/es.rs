@@ -260,6 +260,7 @@ pub static ES: Strings = Strings {
     layout_auto_hint: "Una página en vertical, doble en horizontal — gira el dispositivo para cambiar.",
     stretch_hint: "No: el ajuste nunca supera el 100% nativo (el zoom sí puede).",
     spine_shadow: "Sombra del lomo",
+    spine_shadow_width: "Ancho (25–100 %)",
     vol_keys: "Pasar página con los botones de volumen",
     vol_down_next: "Bajar = siguiente",
     vol_up_next: "Subir = siguiente",

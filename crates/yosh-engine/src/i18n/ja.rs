@@ -260,6 +260,7 @@ pub static JA: Strings = Strings {
     layout_auto_hint: "縦向きは単ページ、横向きは見開き — 端末を回転して切り替えます。",
     stretch_hint: "オフ: 原寸 100% を超えて拡大しない (ズームは可能)。",
     spine_shadow: "ノド影",
+    spine_shadow_width: "幅 (25～100%)",
     vol_keys: "音量キーでページをめくる",
     vol_down_next: "下 = 次へ",
     vol_up_next: "上 = 次へ",

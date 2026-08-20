@@ -260,6 +260,7 @@ pub static ZH_HANT: Strings = Strings {
     layout_auto_hint: "直向單頁，橫向雙頁 — 旋轉裝置即可切換。",
     stretch_hint: "關: 符合時不超過原始 100%（仍可縮放）。",
     spine_shadow: "書背陰影",
+    spine_shadow_width: "寬度 (25–100%)",
     vol_keys: "音量鍵翻頁",
     vol_down_next: "下 = 下一頁",
     vol_up_next: "上 = 下一頁",

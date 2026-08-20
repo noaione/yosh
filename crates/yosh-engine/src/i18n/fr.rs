@@ -260,6 +260,7 @@ pub static FR: Strings = Strings {
     layout_auto_hint: "Simple page en portrait, double page en paysage — pivotez l’appareil pour changer.",
     stretch_hint: "Non : l’ajustement ne dépasse jamais 100 % natif (le zoom le peut).",
     spine_shadow: "Ombre de reliure",
+    spine_shadow_width: "Largeur (25–100 %)",
     vol_keys: "Tourner les pages avec les touches de volume",
     vol_down_next: "Bas = suivante",
     vol_up_next: "Haut = suivante",

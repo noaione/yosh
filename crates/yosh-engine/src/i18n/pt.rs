@@ -260,6 +260,7 @@ pub static PT: Strings = Strings {
     layout_auto_hint: "Página única na vertical, dupla na horizontal — gire o aparelho para alternar.",
     stretch_hint: "Não: o ajuste nunca passa de 100% nativo (o zoom ainda pode).",
     spine_shadow: "Sombra da lombada",
+    spine_shadow_width: "Largura (25–100%)",
     vol_keys: "Virar página com os botões de volume",
     vol_down_next: "Baixo = próxima",
     vol_up_next: "Cima = próxima",

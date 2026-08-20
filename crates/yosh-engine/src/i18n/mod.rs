@@ -387,6 +387,7 @@ pub struct Strings {
     pub layout_auto_hint: &'static str,
     pub stretch_hint: &'static str,
     pub spine_shadow: &'static str,
+    pub spine_shadow_width: &'static str,
     pub vol_keys: &'static str,
     pub vol_down_next: &'static str,
     pub vol_up_next: &'static str,

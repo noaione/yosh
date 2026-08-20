@@ -256,6 +256,7 @@ pub static EN: Strings = Strings {
     layout_auto_hint: "Single in portrait, two-page in landscape — rotate to switch.",
     stretch_hint: "Off: fit never scales past 100% native (zoom still can).",
     spine_shadow: "Spine shadow",
+    spine_shadow_width: "Width (25–100%)",
     vol_keys: "Volume keys turn pages",
     vol_down_next: "Down = next",
     vol_up_next: "Up = next",
