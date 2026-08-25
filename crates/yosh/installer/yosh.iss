@@ -86,14 +86,14 @@ Root: HKCU; Subkey: "Software\Classes\yosh.cb7\shell\open\command"; ValueType: s
 ; to paint .cbz/.cbr/.cb7 previews. Only yosh-owned keys are created, so
 ; uninstall (uninsdeletekey) removes exactly this and nothing else, and file
 ; associations / icons above are untouched.
-Root: HKCU; Subkey: "Software\Classes\CLSID\{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}"; ValueType: string; ValueName: ""; ValueData: "yosh thumbnail provider"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\CLSID\{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\yosh_thumbnail.dll"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\CLSID\{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}\InprocServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Apartment"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\CLSID\{{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}"; ValueType: string; ValueName: ""; ValueData: "yosh thumbnail provider"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\CLSID\{{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\yosh_thumbnail.dll"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\CLSID\{{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}\InprocServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Apartment"; Flags: uninsdeletevalue
 ; Bind the provider to each comic ProgID's thumbnail-extension slot (the
 ; IThumbnailProvider interface IID). This does not change how files open.
-Root: HKCU; Subkey: "Software\Classes\yosh.cbz\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}"; ValueType: string; ValueName: ""; ValueData: "{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\yosh.cbr\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}"; ValueType: string; ValueName: ""; ValueData: "{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\yosh.cb7\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}"; ValueType: string; ValueName: ""; ValueData: "{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\yosh.cbz\ShellEx\{{E357FCCD-A995-4576-B01F-234630154E96}"; ValueType: string; ValueName: ""; ValueData: "{{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\yosh.cbr\ShellEx\{{E357FCCD-A995-4576-B01F-234630154E96}"; ValueType: string; ValueName: ""; ValueData: "{{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\yosh.cb7\ShellEx\{{E357FCCD-A995-4576-B01F-234630154E96}"; ValueType: string; ValueName: ""; ValueData: "{{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\yosh.png"; ValueType: string; ValueName: ""; ValueData: "PNG image"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\yosh.png\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\icons\png.ico"
 Root: HKCU; Subkey: "Software\Classes\yosh.png\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
