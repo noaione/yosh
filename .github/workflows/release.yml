@@ -145,6 +145,12 @@ jobs:
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
 
+      - name: Build Windows thumbnail provider
+        if: runner.os == 'Windows'
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
+        run: cargo build --release -p yosh-thumbnail --features avif
+
       - name: Package
         shell: bash
         run: cp "${{ matrix.bin }}" "${{ matrix.asset }}"
@@ -155,6 +161,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force portable/yosh | Out-Null
           Copy-Item target/release/yosh.exe portable/yosh/yosh.exe
+          Copy-Item target/release/yosh_thumbnail.dll portable/yosh/yosh_thumbnail.dll
           Copy-Item crates/yosh/installer/yosh-portable.txt portable/yosh/yosh-portable.txt
           Compress-Archive -Path portable/yosh -DestinationPath yosh-windows-x64-portable.zip -Force
 

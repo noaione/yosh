@@ -11,6 +11,7 @@
 
 pub mod cache;
 pub mod caption;
+pub mod cover;
 pub mod decode;
 pub mod gesture;
 pub mod gpu;
