@@ -72,7 +72,9 @@ jobs:
         shell: pwsh
         env:
           RUSTFLAGS: -C target-feature=+crt-static
-        run: cargo build --release -p yosh --features avif
+        run: |
+          cargo build --release -p yosh --features avif
+          cargo build --release -p yosh-thumbnail --features avif
 
       - name: Package executable and portable zip
         shell: pwsh
@@ -80,6 +82,7 @@ jobs:
           Copy-Item target/release/yosh.exe yosh-windows-x64.exe
           New-Item -ItemType Directory -Force portable/yosh | Out-Null
           Copy-Item target/release/yosh.exe portable/yosh/yosh.exe
+          Copy-Item target/release/yosh_thumbnail.dll portable/yosh/yosh_thumbnail.dll
           Copy-Item crates/yosh/installer/yosh-portable.txt portable/yosh/yosh-portable.txt
           Compress-Archive -Path portable/yosh -DestinationPath yosh-windows-x64-portable.zip -Force
 

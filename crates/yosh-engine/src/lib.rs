@@ -10,6 +10,7 @@
 //! `pub mod`/re-export surface as each lands.
 
 pub mod cache;
+pub mod cover;
 pub mod decode;
 pub mod gesture;
 pub mod gpu;

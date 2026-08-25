@@ -1,0 +1,49 @@
+[package]
+name = "yosh-thumbnail"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "yosh_thumbnail"
+# A COM in-process server DLL consumed by Explorer's thumbnail cache. It hosts
+# `IThumbnailProvider` + `IInitializeWithStream`; the Windows loader calls
+# `DllGetClassObject` directly, so the artifact is a `cdylib`. `rlib` is also
+# produced so `cargo test` can link a test harness against the same code.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# AVIF covers inside comic archives (forwarded to the engine's decode path).
+# Off by default so a plain build needs no C toolchain; the CI release build
+# enables it alongside the app.
+avif = ["yosh-engine/avif"]
+
+[dev-dependencies]
+# Build fixture (CBZ) archives and tiny PNG cover images for the COM tests.
+image = "0.25"
+zip = "8"
+
+[dependencies]
+# The decode core: `cover::cover_bytes` extracts the selected cover entry, and
+# `decode`/`meta` decode + probe it without a GPU. (wgpu is a transitive dep but
+# is never used by the provider.)
+yosh-engine = { path = "../yosh-engine" }
+# The CPU `Resizer` the engine's `decode_page` takes. The engine depends on it
+# but does not re-export it, so the DLL re-uses the same crate version.
+fast_image_resize = "6"
+
+[target.'cfg(windows)'.dependencies]
+# COM bindings for IThumbnailProvider / IInitializeWithStream / IStream /
+# IClassFactory and GDI HBITMAP creation. Pure Rust bindings — no C toolchain.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_PropertiesSystem",
+] }
+# The `#[implement]` attribute macro expands to code that references
+# `::windows_core` directly, so the crate must be in scope as a direct dep (the
+# `windows` crate only re-exports it as `windows::core`, which isn't the path the
+# generated code uses).
+windows-core = "0.62"

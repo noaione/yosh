@@ -49,6 +49,9 @@ Name: "context_menu"; Description: "Add ""View with yosh"" when right-clicking c
 
 [Files]
 Source: "..\..\..\target\release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion
+; Windows Explorer thumbnail provider (COM in-proc server) for .cbz/.cbr/.cb7.
+; Must sit beside yosh.exe; the CLSID/InprocServer32 entry below points here.
+Source: "..\..\..\target\release\yosh_thumbnail.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\assets\yosh.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; Per-file-type icons shown in Explorer (one .ico per format, referenced by the
 ; per-format ProgIDs below).
@@ -77,6 +80,20 @@ Root: HKCU; Subkey: "Software\Classes\yosh.cbr\shell\open\command"; ValueType: s
 Root: HKCU; Subkey: "Software\Classes\yosh.cb7"; ValueType: string; ValueName: ""; ValueData: "CB7 comic"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\yosh.cb7\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\icons\cb7.ico"
 Root: HKCU; Subkey: "Software\Classes\yosh.cb7\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
+
+; ---- Explorer thumbnail provider (yosh-thumbnail.dll) ----
+; Registers a per-user COM in-proc server that Explorer's thumbnail cache loads
+; to paint .cbz/.cbr/.cb7 previews. Only yosh-owned keys are created, so
+; uninstall (uninsdeletekey) removes exactly this and nothing else, and file
+; associations / icons above are untouched.
+Root: HKCU; Subkey: "Software\Classes\CLSID\{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}"; ValueType: string; ValueName: ""; ValueData: "yosh thumbnail provider"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\CLSID\{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}\InprocServer32"; ValueType: string; ValueName: ""; ValueData: "{app}\yosh_thumbnail.dll"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\CLSID\{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}\InprocServer32"; ValueType: string; ValueName: "ThreadingModel"; ValueData: "Apartment"; Flags: uninsdeletevalue
+; Bind the provider to each comic ProgID's thumbnail-extension slot (the
+; IThumbnailProvider interface IID). This does not change how files open.
+Root: HKCU; Subkey: "Software\Classes\yosh.cbz\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}"; ValueType: string; ValueName: ""; ValueData: "{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\yosh.cbr\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}"; ValueType: string; ValueName: ""; ValueData: "{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\yosh.cb7\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}"; ValueType: string; ValueName: ""; ValueData: "{d3a1ee1d-fe0a-4772-902f-1fb50f3f9222}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\yosh.png"; ValueType: string; ValueName: ""; ValueData: "PNG image"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\yosh.png\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\icons\png.ico"
 Root: HKCU; Subkey: "Software\Classes\yosh.png\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""
@@ -276,3 +293,21 @@ Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.psd\shell\yosh.vie
 Root: HKCU; Subkey: "Software\Classes\Directory\shell\yosh.view"; ValueType: string; ValueName: ""; ValueData: "View with yosh"; Tasks: context_menu; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\Directory\shell\yosh.view"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExe},0"; Tasks: context_menu
 Root: HKCU; Subkey: "Software\Classes\Directory\shell\yosh.view\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExe}"" ""%1"""; Tasks: context_menu
+
+; ---- Refresh Explorer after (un/re)install ----
+; Tell the shell its file-type→handler associations changed so it re-resolves the
+; thumbnail provider and can clear stale thumbnails without a log-off. Called on
+; install and upgrade; uninstall handles its own registry removal.
+[Code]
+procedure SHChangeNotify(wEventId: LongWord; uFlags: LongWord; dwData1: LongWord; dwData2: LongWord);
+  external 'SHChangeNotify@shell32.dll stdcall';
+
+const
+  SHCNE_ASSOCCHANGED = $08000000;
+  SHCNF_IDLIST = $00000000;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, 0, 0);
+end;
