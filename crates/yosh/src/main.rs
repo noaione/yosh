@@ -9,6 +9,7 @@
 mod app;
 mod config;
 mod gpu;
+mod hotkeys;
 mod library;
 mod ui;
 mod update;

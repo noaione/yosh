@@ -21,6 +21,7 @@ use notify::Watcher as _; // brings the `.watch()` method into scope
 
 use crate::config;
 use crate::gpu::Gpu;
+use crate::hotkeys::{self, Action, CaptureMode, HotkeyRequest, KeyBinding};
 use crate::library::{Library, VolKind, cover_bytes};
 use crate::ui::{self, UiState};
 use crate::update;
@@ -1182,10 +1183,19 @@ impl ApplicationHandler for App {
                     || state.modifiers.super_key();
                 if command_modified {
                     // Ctrl/Alt/Super combinations belong to focused tools and OS chrome.
+                } else if let Some((action, mode)) = state.ui.hotkeys_capture
+                    && !response.consumed
+                {
+                    // Capture has explicit priority: the key goes to the binding
+                    // dialog, never to a reader action.
+                    state.handle_hotkey_capture(&event, action, mode);
                 } else if is_escape(&event) && state.close_top_overlay() {
                     // Escape closes focused app chrome before it can quit the app.
-                } else if let Some(action) = action_from(&event)
-                    && !response.consumed
+                } else if let Some(action) = state.settings.hotkeys.resolve(
+                    event.physical_key,
+                    &event.logical_key,
+                    state.modifiers,
+                ) && !response.consumed
                 {
                     if matches!(action, Action::Quit) {
                         // Immediate exit, skipping destructor teardown — see
@@ -1312,100 +1322,6 @@ impl ApplicationHandler for App {
     }
 }
 
-enum Action {
-    Forward,
-    Backward,
-    Left,
-    Right,
-    First,
-    Last,
-    CycleFit,
-    ToggleDir,
-    ToggleLayout,
-    ToggleScroll,
-    ZoomIn,
-    ZoomOut,
-    // View presets (number keys): each sets a complete page-flip view at once.
-    PresetWindow,
-    PresetWidth,
-    PresetActual,
-    PresetSpreadLtr,
-    PresetSpreadRtl,
-    ToggleHelp,
-    ToggleFullscreen,
-    ToggleSpreadOffset,
-    ToggleInfo,
-    ToggleSeekbar,
-    TogglePageJump,
-    TogglePageTransition,
-    ToggleStretch,
-    ToggleSpineShadow,
-    ToggleAnimBar,
-    PrevVolume,
-    NextVolume,
-    Rotate,
-    ShowInExplorer,
-    Quit,
-}
-
-/// Map a key event to an action, preferring the physical key but falling back to
-/// the logical key (covers injected events without scancodes). Vertical keys are
-/// absolute (forward/backward); horizontal keys are resolved by reading direction.
-fn action_from(ev: &KeyEvent) -> Option<Action> {
-    if let PhysicalKey::Code(c) = ev.physical_key {
-        match c {
-            KeyCode::ArrowDown | KeyCode::Space | KeyCode::PageDown => {
-                return Some(Action::Forward);
-            }
-            KeyCode::ArrowUp | KeyCode::PageUp => return Some(Action::Backward),
-            KeyCode::ArrowRight => return Some(Action::Right),
-            KeyCode::ArrowLeft => return Some(Action::Left),
-            KeyCode::Home => return Some(Action::First),
-            KeyCode::End => return Some(Action::Last),
-            KeyCode::KeyD => return Some(Action::ToggleDir),
-            KeyCode::KeyS => return Some(Action::ToggleLayout),
-            KeyCode::KeyO => return Some(Action::ToggleSpreadOffset),
-            KeyCode::KeyC => return Some(Action::ToggleScroll),
-            KeyCode::KeyB => return Some(Action::ToggleSeekbar),
-            KeyCode::KeyJ => return Some(Action::TogglePageJump),
-            KeyCode::KeyT => return Some(Action::TogglePageTransition),
-            KeyCode::KeyZ => return Some(Action::ToggleStretch),
-            KeyCode::KeyV => return Some(Action::ToggleSpineShadow),
-            KeyCode::KeyG => return Some(Action::ToggleAnimBar),
-            KeyCode::KeyE => return Some(Action::ShowInExplorer),
-            KeyCode::KeyR => return Some(Action::Rotate),
-            KeyCode::Equal | KeyCode::NumpadAdd => return Some(Action::ZoomIn),
-            KeyCode::Minus | KeyCode::NumpadSubtract => return Some(Action::ZoomOut),
-            KeyCode::Digit9 | KeyCode::Numpad9 => return Some(Action::PresetWindow),
-            KeyCode::Digit8 | KeyCode::Numpad8 => return Some(Action::PresetWidth),
-            KeyCode::Digit7 | KeyCode::Numpad7 => return Some(Action::PresetSpreadLtr),
-            KeyCode::Digit6 | KeyCode::Numpad6 => return Some(Action::PresetSpreadRtl),
-            KeyCode::Digit0 | KeyCode::Numpad0 => return Some(Action::PresetActual),
-            KeyCode::F1 => return Some(Action::ToggleHelp),
-            KeyCode::KeyI => return Some(Action::ToggleInfo),
-            KeyCode::F11 => return Some(Action::ToggleFullscreen),
-            KeyCode::Escape => return Some(Action::Quit),
-            KeyCode::BracketLeft => return Some(Action::PrevVolume),
-            KeyCode::BracketRight => return Some(Action::NextVolume),
-            _ => {}
-        }
-    }
-    if let Key::Named(n) = &ev.logical_key {
-        match n {
-            NamedKey::ArrowDown | NamedKey::PageDown => return Some(Action::Forward),
-            NamedKey::ArrowUp | NamedKey::PageUp => return Some(Action::Backward),
-            NamedKey::ArrowRight => return Some(Action::Right),
-            NamedKey::ArrowLeft => return Some(Action::Left),
-            NamedKey::Home => return Some(Action::First),
-            NamedKey::End => return Some(Action::Last),
-            NamedKey::F1 => return Some(Action::ToggleHelp),
-            NamedKey::Escape => return Some(Action::Quit),
-            _ => {}
-        }
-    }
-    None
-}
-
 /// Gather display info for page `index` (Tab overlay): reads the page bytes once
 /// and probes the header for resolution + format. A free function over the bare
 /// source, because it runs on a **background** thread — `read_page` and `modified`
@@ -1467,12 +1383,54 @@ impl State {
             self.ui.jump_open = false;
         } else if self.ui.settings_open {
             self.ui.settings_open = false;
+        } else if self.ui.hotkeys_open {
+            self.ui.hotkeys_open = false;
         } else if self.ui.help_open {
             self.ui.help_open = false;
         } else {
             return false;
         }
         true
+    }
+
+    /// Handle a key press while the Hotkeys page's capture prompt is active.
+    /// Command-modified, modifier-only, and unidentified keys are rejected (they
+    /// can't become bindings); a valid key — including `Esc` — stages a typed
+    /// `HotkeyRequest` the app validates and commits after the egui frame.
+    /// Cancellation is via the prompt's Cancel button, not `Esc`, so `Esc`
+    /// itself can be bound.
+    fn handle_hotkey_capture(&mut self, ev: &KeyEvent, action: Action, mode: CaptureMode) {
+        let code = match ev.physical_key {
+            PhysicalKey::Code(c) => c,
+            _ => {
+                // Dead keys, IME composition, and unidentified virtual keys
+                // can't become bindings.
+                self.ui.hotkeys_status = Some("Unsupported key — press a physical key".into());
+                return;
+            }
+        };
+        let m = self.modifiers;
+        if m.control_key() || m.alt_key() || m.super_key() {
+            self.ui.hotkeys_status = Some("Ctrl/Alt/Super combinations aren't allowed".into());
+            return;
+        }
+        if hotkeys::is_modifier_key(code) {
+            self.ui.hotkeys_status = Some("Modifier keys can't be bound on their own".into());
+            return;
+        }
+        let binding = KeyBinding {
+            code,
+            ctrl: false,
+            alt: false,
+            shift: m.shift_key(),
+            super_: false,
+        };
+        self.ui.hotkeys_capture = None;
+        self.ui.hotkey_req = Some(HotkeyRequest::Set {
+            action,
+            mode,
+            binding,
+        });
     }
 
     fn apply_action(&mut self, action: Action) {
@@ -3302,6 +3260,8 @@ impl State {
             }
         );
         self.ui.color_detection = self.settings.color_detection;
+        // Read-only hotkey display model for the Hotkeys page + F1 help overlay.
+        self.ui.hotkeys = self.settings.hotkeys.clone();
         // Lets the chrome tell "nothing open" (→ onboarding panel) apart from the
         // library grid; `ui.opened` is sticky once set, so it can't.
         self.ui.reader_open = self.reader.source.is_some();
@@ -3759,6 +3719,48 @@ impl State {
             ));
             self.info_for = None;
             config::save(&self.settings);
+            ui_acted = true;
+        }
+        // Hotkeys-page edits: validate (reject duplicates), commit to Settings,
+        // persist, and report the outcome beside the changed row.
+        if let Some(req) = self.ui.hotkey_req.take() {
+            match req {
+                HotkeyRequest::Set {
+                    action,
+                    mode,
+                    binding,
+                } => {
+                    if let Some(conflict) = self.settings.hotkeys.conflict(action, binding) {
+                        self.ui.hotkeys_status = Some(format!(
+                            "Conflict with “{}” — remove or reassign it first",
+                            conflict.label()
+                        ));
+                    } else {
+                        match mode {
+                            CaptureMode::Add => self.settings.hotkeys.add(action, binding),
+                            CaptureMode::Replace => self.settings.hotkeys.replace(action, binding),
+                        }
+                        config::save(&self.settings);
+                        self.ui.hotkeys_status =
+                            Some(format!("{} → {}", action.label(), binding.label()));
+                    }
+                }
+                HotkeyRequest::Clear { action } => {
+                    self.settings.hotkeys.clear(action);
+                    config::save(&self.settings);
+                    self.ui.hotkeys_status = Some(format!("Cleared {}", action.label()));
+                }
+                HotkeyRequest::ResetOne { action } => {
+                    self.settings.hotkeys.reset_one(action);
+                    config::save(&self.settings);
+                    self.ui.hotkeys_status = Some(format!("Reset {}", action.label()));
+                }
+                HotkeyRequest::ResetAll => {
+                    self.settings.hotkeys.reset_all();
+                    config::save(&self.settings);
+                    self.ui.hotkeys_status = Some("Reset all to defaults".into());
+                }
+            }
             ui_acted = true;
         }
         // Seekbar jump: re-clamp against the live source, skip a redundant goto

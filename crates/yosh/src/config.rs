@@ -175,6 +175,9 @@ pub struct Settings {
     pub perf: PerfPref,
     /// Last window geometry (size/position/maximized). None until first saved.
     pub window: Option<WindowState>,
+    /// Customizable keyboard shortcuts. Missing in an old `state.json` → the
+    /// historical defaults via `HotkeyMap::default()`.
+    pub hotkeys: crate::hotkeys::HotkeyMap,
 }
 
 impl Default for Settings {
@@ -207,6 +210,7 @@ impl Default for Settings {
             theme: ThemePref::Dark,
             perf: PerfPref::Auto,
             window: None,
+            hotkeys: crate::hotkeys::HotkeyMap::default(),
         }
     }
 }
@@ -299,6 +303,16 @@ mod tests {
         assert!(
             !s.no_stretch,
             "missing no-stretch defaults to off (stretch to fit)"
+        );
+        // Missing `hotkeys` loads the historical default map (Space → Forward).
+        assert_eq!(
+            s.hotkeys.resolve(
+                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Space),
+                &winit::keyboard::Key::Unidentified(winit::keyboard::NativeKey::Unidentified),
+                winit::keyboard::ModifiersState::default(),
+            ),
+            Some(crate::hotkeys::Action::Forward),
+            "missing hotkeys defaults to the historical map"
         );
         // The keys that *were* present survive, so this isn't a silent reset.
         assert!(!s.direction_rtl);

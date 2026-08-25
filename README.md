@@ -40,6 +40,11 @@ Default `cargo build` needs no system libraries (pure-Rust decoders).
     registered as a default `.psd` handler (a "View with yosh" right-click entry is offered instead).
 
 ## Controls (press <kbd>F1</kbd> in-app for the full list)
+The keyboard shortcuts below are the **defaults** — every one of them is
+customizable from the `⌨ Hotkeys` page (top bar, or `⚙ Settings → Configure
+hotkeys…`). Bindings are physical keys, so they work across keyboard layouts;
+`Ctrl`/`Alt`/`Super` combinations can't be bound (they'd steal OS/tool commands).
+
 | | |
 |---|---|
 | Flip | ← → (reading-direction aware), ↑ ↓ / Space / PgUp · PgDn; click a left/right **edge**; wheel |
