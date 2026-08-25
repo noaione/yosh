@@ -269,7 +269,7 @@ fn cmyk_icc_to_rgba(profile: &[u8], cmyk: &[u8], w: u32, h: u32) -> Option<Vec<u
 
 /// True if every RGBA pixel is fully opaque (alpha 255).
 fn is_opaque(rgba: &[u8]) -> bool {
-    rgba.chunks_exact(4).all(|px| px[3] == 255)
+    rgba.as_chunks::<4>().0.iter().all(|px| px[3] == 255)
 }
 
 /// Premultiply R,G,B by A in place (gamma space — consistent with the rest of the
@@ -278,7 +278,7 @@ fn is_opaque(rgba: &[u8]) -> bool {
 /// fully-transparent pixels and lets the bilinear sampler interpolate edges
 /// without colour fringing.
 fn premultiply_alpha(rgba: &mut [u8]) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         let a = px[3] as u32;
         px[0] = ((px[0] as u32 * a + 127) / 255) as u8;
         px[1] = ((px[1] as u32 * a + 127) / 255) as u8;
@@ -604,7 +604,7 @@ fn decode_raw(bytes: &[u8]) -> Result<Decoded, String> {
 fn rgba_is_grayscale(rgba: &[u8], threshold: i32) -> bool {
     let mut diff_sum: u64 = 0;
     let mut non_bw: u64 = 0;
-    for px in rgba.chunks_exact(4) {
+    for px in rgba.as_chunks::<4>().0 {
         let (r, g, b) = (px[0] as i32, px[1] as i32, px[2] as i32);
         if (r == 0 && g == 0 && b == 0) || (r == 255 && g == 255 && b == 255) {
             continue; // exclude pure black / pure white
@@ -665,7 +665,9 @@ fn detect_color(
 /// Collapse RGBA to a single luminance channel (ITU-R 601, matching cv2's
 /// `COLOR_BGR2GRAY`): `Y = 0.299R + 0.587G + 0.114B`.
 fn rgba_to_luma(rgba: &[u8]) -> Vec<u8> {
-    rgba.chunks_exact(4)
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
         .map(|px| {
             let y = 0.299 * px[0] as f32 + 0.587 * px[1] as f32 + 0.114 * px[2] as f32;
             y.round().clamp(0.0, 255.0) as u8
@@ -703,8 +705,10 @@ fn downscale_gray(
     let enc = tone::linear_to_dotgain();
     let bytes = dst.into_vec();
     let pixels: Vec<u8> = bytes
-        .chunks_exact(2)
-        .map(|c| enc[u16::from_ne_bytes([c[0], c[1]]) as usize])
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| enc[u16::from_ne_bytes(*c) as usize])
         .collect();
     Ok(DecodedImage {
         w: tw,
