@@ -965,7 +965,10 @@ impl ApplicationHandler for App {
         // the `state.as_mut()` early-return above handles a re-entered `resumed`, and
         // the desktop shell builds `State` exactly once.
         let open_tx = self.open_tx.clone();
-        let open_rx = self.open_rx.take().expect("desktop resumed builds State once");
+        let open_rx = self
+            .open_rx
+            .take()
+            .expect("desktop resumed builds State once");
         // Channels for sibling-volume prescans and the off-thread Tab info overlay.
         let (sib_tx, sib_rx) = std::sync::mpsc::channel();
         let (info_tx, info_rx) = std::sync::mpsc::channel();

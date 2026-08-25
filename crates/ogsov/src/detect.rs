@@ -66,7 +66,9 @@ impl Ogsov {
 
         let mut read_f32s = |n: usize| -> Vec<f32> {
             let out = data[off..off + n * 4]
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
                 .collect();
             off += n * 4;
@@ -181,7 +183,7 @@ impl Ogsov {
         let mut hist = vec![0u32; COLORFULNESS_BINS];
         let mut mask_hits: u64 = 0;
         let mut max_d2 = 0usize;
-        for px in pixels.chunks_exact(CHANNELS) {
+        for px in pixels.as_chunks::<CHANNELS>().0 {
             let (r8, g8, b8) = (px[0], px[1], px[2]);
             if self.mask_bit(r8, g8, b8) {
                 mask_hits += 1;
@@ -363,7 +365,7 @@ impl Ogsov {
         assert!(n > TOP_N);
         let mut color = Vec::with_capacity(n);
         let mut mask_hits = 0u64;
-        for px in pixels.chunks_exact(CHANNELS) {
+        for px in pixels.as_chunks::<CHANNELS>().0 {
             let (r8, g8, b8) = (px[0], px[1], px[2]);
             mask_hits += self.mask_bit(r8, g8, b8) as u64;
             let (r, g, b) = (r8 as f32, g8 as f32, b8 as f32);
@@ -496,7 +498,9 @@ pub fn is_grayscale_rgb(rgb: &[u8]) -> bool {
 
 fn is_grayscale<const CHANNELS: usize>(pixels: &[u8]) -> bool {
     pixels
-        .chunks_exact(CHANNELS)
+        .as_chunks::<CHANNELS>()
+        .0
+        .iter()
         .all(|px| px[0] == px[1] && px[1] == px[2])
 }
 

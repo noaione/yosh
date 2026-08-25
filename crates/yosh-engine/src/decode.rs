@@ -236,7 +236,7 @@ fn jpeg_cmyk_convention(bytes: &[u8]) -> (bool, bool) {
 /// (`c·nk + 128 ≤ 65153`) and `nk − div ≥ 0`, so no clamping is needed.
 fn cmyk_fallback_to_rgba(ink: &[u8], ycck: bool) -> Vec<u8> {
     let mut out = Vec::with_capacity(ink.len());
-    for px in ink.chunks_exact(4) {
+    for px in ink.as_chunks::<4>().0 {
         let (c, m, y, k) = (px[0] as u32, px[1] as u32, px[2] as u32, px[3] as u32);
         let nk = 255 - k;
         let scale = |v: u32| {
@@ -441,7 +441,12 @@ fn decode_jxl(bytes: &[u8]) -> Result<Decoded, String> {
             w,
             h,
             true,
-            samples.chunks_exact(2).map(|px| to_u8(px[0])).collect(),
+            samples
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|px| to_u8(px[0]))
+                .collect(),
             icc,
         )),
         // RGB(A) → RGBA8. CMYK(A) sources converted to sRGB here must not
@@ -452,7 +457,7 @@ fn decode_jxl(bytes: &[u8]) -> Result<Decoded, String> {
             let mut pixels = vec![0u8; n * 4];
             for (px, out) in samples
                 .chunks_exact(ch as usize)
-                .zip(pixels.chunks_exact_mut(4))
+                .zip(pixels.as_chunks_mut::<4>().0)
             {
                 out[0] = to_u8(px[0]);
                 out[1] = to_u8(px[1]);

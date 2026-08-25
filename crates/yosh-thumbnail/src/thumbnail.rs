@@ -12,11 +12,10 @@ use std::io::Write as _;
 use std::mem::size_of;
 use std::path::PathBuf;
 use std::ptr::null_mut;
-use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 use fast_image_resize::Resizer;
-use windows::core::{implement, BOOL, ComObject, GUID, Interface, Ref};
 use windows::Win32::Foundation::{
     CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, E_FAIL, E_INVALIDARG, E_NOINTERFACE, S_FALSE,
     S_OK,
@@ -24,15 +23,14 @@ use windows::Win32::Foundation::{
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, HBITMAP,
 };
-use windows::Win32::System::Com::{
-    IClassFactory, IClassFactory_Impl, IStream, STREAM_SEEK_SET,
-};
+use windows::Win32::System::Com::{IClassFactory, IClassFactory_Impl, IStream, STREAM_SEEK_SET};
 use windows::Win32::UI::Shell::PropertiesSystem::{
     IInitializeWithStream, IInitializeWithStream_Impl,
 };
 use windows::Win32::UI::Shell::{
     IThumbnailProvider, IThumbnailProvider_Impl, WTS_ALPHATYPE, WTSAT_ARGB, WTSAT_RGB,
 };
+use windows::core::{BOOL, ComObject, GUID, Interface, Ref, implement};
 
 use yosh_engine::cover::cover_bytes;
 use yosh_engine::decode::{DecodedImage, DecodedPage, decode_page};
@@ -103,9 +101,8 @@ impl IThumbnailProvider_Impl for ThumbnailProvider_Impl {
             return Err(E_FAIL.into());
         };
 
-        let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            build_thumbnail(&path, cx)
-        }));
+        let built =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| build_thumbnail(&path, cx)));
         match built {
             Ok(Ok((hbmp, has_alpha))) => {
                 unsafe {
@@ -244,7 +241,10 @@ pub extern "system" fn DllCanUnloadNow() -> i32 {
 /// The actual thumbnail work: extract the cover, decode it to fit `cx`, convert
 /// to premultiplied BGRA, and wrap it in an owned `HBITMAP`. Returns whether
 /// the image carries non-opaque alpha.
-fn build_thumbnail(path: &std::path::Path, cx: u32) -> Result<(HBITMAP, bool), windows::core::Error> {
+fn build_thumbnail(
+    path: &std::path::Path,
+    cx: u32,
+) -> Result<(HBITMAP, bool), windows::core::Error> {
     let cover = cover_bytes(path).map_err(|_| E_FAIL)?;
     let target_h = thumbnail_target_h(&cover.bytes, cx);
     let mut resizer = Resizer::new();
@@ -287,7 +287,7 @@ fn to_bgra(img: &DecodedImage) -> (Vec<u8>, bool) {
         return (out, false);
     }
     let mut has_alpha = false;
-    for px in img.pixels.chunks_exact(4) {
+    for px in img.pixels.as_chunks::<4>().0 {
         let (r, g, b, a) = (px[0] as u32, px[1] as u32, px[2] as u32, px[3] as u32);
         if a < 255 {
             has_alpha = true;
@@ -312,16 +312,7 @@ fn create_dib_section(w: u32, h: u32, bgra: &[u8]) -> Result<HBITMAP, windows::c
     bi.bmiHeader.biBitCount = 32;
     bi.bmiHeader.biCompression = BI_RGB.0;
     let mut bits = null_mut();
-    let hbmp = unsafe {
-        CreateDIBSection(
-            None,
-            &bi,
-            DIB_RGB_COLORS,
-            &mut bits,
-            None,
-            0,
-        )?
-    };
+    let hbmp = unsafe { CreateDIBSection(None, &bi, DIB_RGB_COLORS, &mut bits, None, 0)? };
     unsafe {
         if !bits.is_null() && !bgra.is_empty() {
             std::ptr::copy_nonoverlapping(bgra.as_ptr(), bits as *mut u8, bgra.len());
@@ -363,7 +354,13 @@ fn read_stream_to_temp(pstream: &IStream) -> Result<PathBuf, windows::core::Erro
     let mut buf = vec![0u8; 256 * 1024];
     loop {
         let mut read = 0u32;
-        let hr = unsafe { pstream.Read(buf.as_mut_ptr() as *mut std::ffi::c_void, buf.len() as u32, Some(&mut read)) };
+        let hr = unsafe {
+            pstream.Read(
+                buf.as_mut_ptr() as *mut std::ffi::c_void,
+                buf.len() as u32,
+                Some(&mut read),
+            )
+        };
         if hr.is_err() {
             let _ = std::fs::remove_file(&path);
             return Err(E_FAIL.into());
@@ -411,10 +408,8 @@ mod tests {
     /// Build a `.cbz` containing a single named image entry.
     fn write_cbz(tag: &str, name: &str, bytes: &[u8]) -> std::path::PathBuf {
         use zip::write::SimpleFileOptions;
-        let path = std::env::temp_dir().join(format!(
-            "yosh_thumb_{}_{tag}.cbz",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("yosh_thumb_{}_{tag}.cbz", std::process::id()));
         let f = std::fs::File::create(&path).unwrap();
         let mut w = zip::ZipWriter::new(f);
         w.start_file(name, SimpleFileOptions::default()).unwrap();
@@ -425,11 +420,8 @@ mod tests {
 
     /// Encode a solid-colour `w × h` PNG.
     fn make_png(w: u32, h: u32, rgba: [u8; 4]) -> Vec<u8> {
-        let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
-            w,
-            h,
-            image::Rgba(rgba),
-        ));
+        let img =
+            image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(w, h, image::Rgba(rgba)));
         let mut buf = Vec::new();
         img.write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
             .unwrap();
@@ -473,7 +465,7 @@ mod tests {
         let mut alpha = WTSAT_UNKNOWN;
         unsafe { provider.GetThumbnail(256, &mut hbmp, &mut alpha) }.unwrap();
 
-        assert!(hbmp.0 != std::ptr::null_mut(), "provider returned a null bitmap");
+        assert!(!hbmp.0.is_null(), "provider returned a null bitmap");
         assert_eq!(alpha, WTSAT_RGB, "opaque cover should be WTSAT_RGB");
 
         let mut bm: BITMAP = unsafe { std::mem::zeroed() };
@@ -494,7 +486,9 @@ mod tests {
         drop(init);
         drop(object);
         let _ = std::fs::remove_file(&cbz);
-        unsafe { CoUninitialize(); }
+        unsafe {
+            CoUninitialize();
+        }
     }
 
     #[test]
@@ -530,7 +524,7 @@ mod tests {
         let mut hbmp = HBITMAP::default();
         let mut alpha = WTSAT_UNKNOWN;
         unsafe { provider.GetThumbnail(256, &mut hbmp, &mut alpha) }.unwrap();
-        assert!(hbmp.0 != std::ptr::null_mut());
+        assert!(!hbmp.0.is_null());
         let mut bm: BITMAP = unsafe { std::mem::zeroed() };
         let _ = unsafe {
             GetObjectA(
@@ -573,12 +567,14 @@ mod tests {
         let mut alpha2 = WTSAT_UNKNOWN;
         let hr = unsafe { provider2.GetThumbnail(256, &mut hbmp2, &mut alpha2) };
         assert!(hr.is_err());
-        assert!(hbmp2.0 == std::ptr::null_mut(), "failure must leave a null bitmap");
+        assert!(hbmp2.0.is_null(), "failure must leave a null bitmap");
 
         drop(provider2);
         drop(init2);
         drop(object2);
         let _ = std::fs::remove_file(&corrupt);
-        unsafe { CoUninitialize(); }
+        unsafe {
+            CoUninitialize();
+        }
     }
 }
