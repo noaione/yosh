@@ -112,8 +112,10 @@ cargo test  -p yosh spread                             # run a subset of tests b
   - **`render()`** is the per-frame heart: drain the pool, recompute+debounce the decode view
     (`update_decode_view`), build draw quads, draw pages, then the egui chrome. Re-read this before touching
     frame behavior.
-  - Input: keyboard → `Action` enum via `action_from()` → `apply_action()`. The keymap is the source of truth
-    for shortcuts (README/F1 help mirror it).
+  - Input: keyboard → `Action` enum via the data-driven `HotkeyMap` in `hotkeys.rs`
+    (`resolve()` replaces the old hard-coded `action_from()`) → `apply_action()`. The
+    map is the source of truth for shortcuts (README/F1 help derive from it), and is
+    user-customizable from the `⌨ Hotkeys` page (persisted in `Settings.hotkeys`).
   - **Two reading modes** gated by `scroll_mode`: discrete page-flip (with `single`/two-page-spread `Layout`)
     vs continuous vertical scroll (anchor page + `top_offset`, `normalize()` rolls the anchor across bounds).
 - **`layout.rs`**: spread pairing math — single vs two-page, RTL/LTR, and the spread-pairing parity `offset`

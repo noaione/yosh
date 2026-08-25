@@ -86,6 +86,20 @@ pub struct UiState {
     pub req_toggle_resume_start_at_first_page: bool,
     /// Whether the Settings panel window is open (toggled by the top-bar gear).
     pub settings_open: bool,
+    // Hotkeys page state. `hotkeys` is the read-only display model the app
+    // clones from Settings each frame; the `hotkey_req` field is drained by the
+    // app after the egui frame (validated, committed, persisted).
+    pub hotkeys: crate::hotkeys::HotkeyMap,
+    /// Whether the `⌨ Hotkeys` window is open.
+    pub hotkeys_open: bool,
+    /// Search/filter text for the Hotkeys page.
+    pub hotkeys_filter: String,
+    /// Active capture prompt: `(action, mode)` while waiting for a key press.
+    pub hotkeys_capture: Option<(crate::hotkeys::Action, crate::hotkeys::CaptureMode)>,
+    /// Status/error text beside the changed row (conflict, saved, reset…).
+    pub hotkeys_status: Option<String>,
+    /// A typed hotkey edit request, drained by the app after the frame.
+    pub hotkey_req: Option<crate::hotkeys::HotkeyRequest>,
     // Settings-panel requests, drained by the app after the frame.
     pub req_toggle_scroll: bool,
     pub req_toggle_pairing: bool,
@@ -580,6 +594,13 @@ pub fn chrome(
             {
                 st.settings_open = !st.settings_open;
             }
+            if ui
+                .button(tr().hotkeys.title)
+                .on_hover_text(tr().hotkeys.button_hint)
+                .clicked()
+            {
+                st.hotkeys_open = !st.hotkeys_open;
+            }
             if ui.button(tr().help).clicked() {
                 st.help_open = !st.help_open;
             }
@@ -671,40 +692,69 @@ pub fn chrome(
 
     if st.help_open {
         let t = tr();
+        // Help is a reference sheet. Keep it scrollable and bounded so the
+        // customized binding list stays usable on short screens.
+        let screen = ctx.content_rect();
+        let max_h = screen.height() - 48.0;
+        let default_h = max_h.min(640.0);
+        let max_w = screen.width();
+        let default_w = max_w.min(480.0);
         // Fixed id: egui keys a window by its title, which changes with the language.
         egui::Window::new(t.help_title)
             .id(egui::Id::new("help_window"))
             .collapsible(false)
-            .resizable(false)
+            .resizable(true)
+            .default_size(egui::vec2(default_w, default_h))
+            .max_size(egui::vec2(max_w, max_h))
             .open(&mut st.help_open)
             .show(ctx, |ui| {
                 // Help is read-only reference text; dragging it must not leave a
                 // persistent text-selection highlight behind.
                 ui.style_mut().interaction.selectable_labels = false;
-                ui.label(
-                    egui::RichText::new(concat!("yosh ", env!("CARGO_PKG_VERSION")))
-                        .color(egui::Color32::from_gray(140)),
-                );
-                for (i, sec) in t.help_sections.iter().enumerate() {
-                    if i > 0 {
-                        ui.separator();
-                    }
-                    ui.heading(sec.title);
-                    egui::Grid::new(("help_grid", i)).num_columns(2).spacing([18.0, 4.0]).show(
-                        ui,
-                        |ui| {
-                            for (keys, what) in sec.rows {
-                                ui.label(egui::RichText::new(*keys).strong());
-                                ui.label(*what);
-                                ui.end_row();
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(concat!("yosh ", env!("CARGO_PKG_VERSION")))
+                                .color(egui::Color32::from_gray(140)),
+                        );
+                        // Keyboard lines derive from the live HotkeyMap, so the
+                        // help always matches the user's (possibly customized)
+                        // bindings.
+                        for category in crate::hotkeys::Category::ALL {
+                            ui.heading(category.label());
+                            for action in category.actions() {
+                                let bindings = st.hotkeys.bindings_for(*action);
+                                let keys = if bindings.is_empty() {
+                                    "—".to_string()
+                                } else {
+                                    bindings
+                                        .iter()
+                                        .map(|b| b.label())
+                                        .collect::<Vec<_>>()
+                                        .join(" / ")
+                                };
+                                ui.label(format!("{keys}   {}", action.label()));
                             }
-                        },
-                    );
-                }
+                            ui.separator();
+                        }
+                        ui.heading(t.hotkeys.mouse_touch);
+                        ui.label(t.hotkeys.click_edges);
+                        ui.label(t.hotkeys.double_click);
+                        ui.label(t.hotkeys.drag_zoom);
+                        ui.label(t.hotkeys.drop_files);
+                        ui.separator();
+                        ui.label(
+                            egui::RichText::new(t.hotkeys.help_footer)
+                                .weak()
+                                .small(),
+                        );
+                    });
             });
     }
 
     settings_window(ctx, st);
+    hotkeys_window(ctx, st);
     page_jump_window(ctx, st);
 
     if st.info_open && !library_view && !st.info.is_empty() {
@@ -1243,8 +1293,199 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
                     }
                 }
             });
+
+            ui.separator();
+            if ui
+                .button(tr().hotkeys.configure_button)
+                .on_hover_text(tr().hotkeys.configure_hint)
+                .clicked()
+            {
+                st.hotkeys_open = true;
+            }
         });
     st.settings_open = open;
+}
+
+/// The `⌨ Hotkeys` page: searchable, grouped rows of every keyboard-driven
+/// action with its current bindings and Add / Replace / Clear / Reset controls.
+/// Clicking Add or Replace arms a capture prompt (`Press key…`, cancelled with
+/// the Cancel button — not Esc, so Esc itself can be bound); the captured key
+/// is validated in `app.rs::handle_hotkey_capture` and applied as a typed
+/// `HotkeyRequest` after the frame. Duplicate bindings are rejected with a
+/// conflict message and leave the map unchanged.
+fn hotkeys_window(ctx: &egui::Context, st: &mut UiState) {
+    if !st.hotkeys_open {
+        return;
+    }
+    let strings = &tr().hotkeys;
+    let mut open = true;
+    // Hard cap the height so the long action list scrolls inside the window
+    // instead of growing to fill the screen. egui persists a window's size, so
+    // a previous oversized session would otherwise stay huge — `max_size` clamps
+    // that every frame. 520px shows ~20 rows; shrinks on tiny screens.
+    let screen = ctx.content_rect();
+    let max_h = (screen.height() - 48.0).clamp(240.0, 520.0);
+    let default_h = max_h.min(480.0);
+    egui::Window::new(strings.title)
+        .collapsible(false)
+        .resizable(true)
+        .default_size(egui::vec2(600.0, default_h))
+        .max_size(egui::vec2(screen.width(), max_h))
+        .open(&mut open)
+        .show(ctx, |ui| {
+            // A control surface, not copyable document text.
+            ui.style_mut().interaction.selectable_labels = false;
+            ui.spacing_mut().item_spacing = egui::vec2(8.0, 6.0);
+
+            ui.horizontal(|ui| {
+                ui.label("🔍");
+                let filter = ui.add(
+                    egui::TextEdit::singleline(&mut st.hotkeys_filter)
+                        .hint_text(strings.filter_hint)
+                        .desired_width(220.0),
+                );
+                // While a capture is armed, the filter must not swallow the key
+                // press — surrender its focus so the next key reaches the dialog.
+                if st.hotkeys_capture.is_some() && filter.has_focus() {
+                    ui.memory_mut(|m| m.surrender_focus(filter.id));
+                }
+                if let Some(status) = &st.hotkeys_status {
+                    ui.label(
+                        egui::RichText::new(status).color(egui::Color32::from_rgb(140, 200, 140)),
+                    );
+                }
+            });
+            ui.separator();
+
+            let capturing = st.hotkeys_capture.is_some();
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let filter = st.hotkeys_filter.trim().to_lowercase();
+                    for category in crate::hotkeys::Category::ALL {
+                        ui.label(
+                            egui::RichText::new(category.label())
+                                .strong()
+                                .color(egui::Color32::from_gray(150)),
+                        );
+                        for action in category.actions() {
+                            let label = action.label();
+                            if !filter.is_empty() && !label.to_lowercase().contains(&filter) {
+                                continue;
+                            }
+                            hotkey_row(ui, st, *action, capturing);
+                        }
+                        ui.separator();
+                    }
+                });
+
+            ui.horizontal(|ui| {
+                if ui
+                    .button(strings.reset_all_button)
+                    .on_hover_text(strings.reset_all_hint)
+                    .clicked()
+                {
+                    st.hotkey_req = Some(crate::hotkeys::HotkeyRequest::ResetAll);
+                }
+                ui.label(
+                    egui::RichText::new(
+                        strings.os_shortcuts_hint,
+                    )
+                    .weak()
+                    .small(),
+                );
+            });
+        });
+    // Closing the window (X) must also disarm any armed capture — otherwise the
+    // next key press would be swallowed by a dialog that's no longer on screen.
+    if !open {
+        st.hotkeys_capture = None;
+        st.hotkeys_status = None;
+    }
+    st.hotkeys_open = open;
+}
+
+/// One action row in the Hotkeys page: label, current bindings, and the
+/// Add / Replace / Clear / Reset controls (or the capture prompt while armed).
+fn hotkey_row(
+    ui: &mut egui::Ui,
+    st: &mut UiState,
+    action: crate::hotkeys::Action,
+    capturing: bool,
+) {
+    use crate::hotkeys::{CaptureMode, HotkeyRequest};
+    let strings = &tr().hotkeys;
+    // Stable per-action id (the serialized token) so egui keeps the row's
+    // capture/focus state straight across frames.
+    ui.push_id(action.id(), |ui| {
+        let bindings = st.hotkeys.bindings_for(action);
+        let keys = if bindings.is_empty() {
+            "—".to_string()
+        } else {
+            bindings
+                .iter()
+                .map(|b| b.label())
+                .collect::<Vec<_>>()
+                .join(" / ")
+        };
+        let this_capturing = st.hotkeys_capture.map(|(a, _)| a) == Some(action);
+        ui.horizontal(|ui| {
+            ui.add_sized([220.0, 20.0], egui::Label::new(action.label()))
+                .on_hover_text(action.category().label());
+            ui.add_sized(
+                [150.0, 20.0],
+                egui::Label::new(egui::RichText::new(keys).weak()),
+            );
+            if this_capturing {
+                ui.label(
+                    egui::RichText::new(strings.press_key)
+                        .color(egui::Color32::from_rgb(220, 190, 120)),
+                );
+                // Cancel via a button, not Esc — Esc must stay capturable as a
+                // binding (and still quits outside the capture prompt).
+                if ui.button(strings.cancel).clicked() {
+                    st.hotkeys_capture = None;
+                    st.hotkeys_status = None;
+                }
+            } else {
+                let can_add = bindings.len() < 2;
+                if ui
+                    .add_enabled(can_add && !capturing, egui::Button::new(strings.add))
+                    .on_hover_text(strings.add_hint)
+                    .clicked()
+                {
+                    st.hotkeys_capture = Some((action, CaptureMode::Add));
+                }
+                if ui
+                    .add_enabled(
+                        !bindings.is_empty() && !capturing,
+                        egui::Button::new(strings.replace),
+                    )
+                    .on_hover_text(strings.replace_hint)
+                    .clicked()
+                {
+                    st.hotkeys_capture = Some((action, CaptureMode::Replace));
+                }
+                if ui
+                    .add_enabled(
+                        !bindings.is_empty() && !capturing,
+                        egui::Button::new(strings.clear),
+                    )
+                    .on_hover_text(strings.clear_hint)
+                    .clicked()
+                {
+                    st.hotkey_req = Some(HotkeyRequest::Clear { action });
+                }
+                if ui
+                    .add_enabled(!capturing, egui::Button::new(strings.reset))
+                    .on_hover_text(strings.reset_hint)
+                    .clicked()
+                {
+                    st.hotkey_req = Some(HotkeyRequest::ResetOne { action });
+                }
+            }
+        });
+    });
 }
 
 /// First-run onboarding, rendered *inside* the library view when no library folder

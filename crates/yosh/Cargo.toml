@@ -9,7 +9,9 @@ edition = "2024"
 # page-decode crates (png/jpeg-decoder/image/jxl-oxide/psd/qcms/fast_image_resize/
 # ico) and archive crates (zip/unrar/sevenz-rust2) live there, not here.
 yosh-engine = { path = "../yosh-engine" }
-winit = "0.30.13"
+# `serde` makes `KeyCode` serializable so the customizable hotkey map can be
+# persisted in state.json (physical codes survive across keyboard layouts).
+winit = { version = "0.30.13", features = ["serde"] }
 wgpu = "29.0.3"
 egui = "0.34.3"
 egui-wgpu = "0.34.3"

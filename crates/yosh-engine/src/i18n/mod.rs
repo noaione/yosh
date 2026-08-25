@@ -186,6 +186,44 @@ pub struct HelpSection {
     pub rows: &'static [(&'static str, &'static str)],
 }
 
+/// Labels and messages for configurable keyboard shortcuts.
+pub struct HotkeyStrings {
+    pub title: &'static str,
+    pub button_hint: &'static str,
+    pub configure_button: &'static str,
+    pub configure_hint: &'static str,
+    pub filter_hint: &'static str,
+    pub reset_all_button: &'static str,
+    pub reset_all_hint: &'static str,
+    pub os_shortcuts_hint: &'static str,
+    pub press_key: &'static str,
+    pub cancel: &'static str,
+    pub add: &'static str,
+    pub add_hint: &'static str,
+    pub replace: &'static str,
+    pub replace_hint: &'static str,
+    pub clear: &'static str,
+    pub clear_hint: &'static str,
+    pub reset: &'static str,
+    pub reset_hint: &'static str,
+    pub unsupported_key: &'static str,
+    pub command_modifiers: &'static str,
+    pub modifier_only: &'static str,
+    pub mouse_touch: &'static str,
+    pub click_edges: &'static str,
+    pub double_click: &'static str,
+    pub drag_zoom: &'static str,
+    pub drop_files: &'static str,
+    pub help_footer: &'static str,
+    pub categories: [&'static str; 5],
+    pub actions: [&'static str; 32],
+    pub status_set: fn(&str, &str) -> String,
+    pub status_conflict: fn(&str) -> String,
+    pub status_cleared: fn(&str) -> String,
+    pub status_reset: fn(&str) -> String,
+    pub status_reset_all: &'static str,
+}
+
 /// Every user-visible UI string. Grouped by where it shows up; the shell-specific
 /// groups are simply unused by the other shell.
 pub struct Strings {
@@ -309,6 +347,7 @@ pub struct Strings {
     // --- desktop: F1 help ---
     pub help_title: &'static str,
     pub help_sections: &'static [HelpSection],
+    pub hotkeys: HotkeyStrings,
 
     // --- desktop: Settings window ---
     pub scroll_speed: &'static str,
