@@ -139,7 +139,7 @@ fn check_input(path: &Path) -> Result<(), CoverError> {
     Ok(())
 }
 
-/// List a comic archive's image entry names, natural-sorted by name. 
+/// List a comic archive's image entry names, natural-sorted by name.
 ///
 /// - CBZ names are legacy-codepage decoded exactly as [`ZipSource`] does (so a
 ///   Shift-JIS/GBK archive lists real characters, not CP437 mojibake).
@@ -484,10 +484,7 @@ mod tests {
 
     #[test]
     fn nested_path_cover_matches() {
-        let names: Vec<String> = vec![
-            "pages/01.jpg".to_string(),
-            "pages/Cover.png".to_string(),
-        ];
+        let names: Vec<String> = vec!["pages/01.jpg".to_string(), "pages/Cover.png".to_string()];
         assert_eq!(select_cover_index(&names), Some(1));
     }
 
@@ -544,10 +541,7 @@ mod tests {
 
     #[test]
     fn cbz_cover_falls_back_to_first_image() {
-        let path = write_zip(
-            "cbz_fallback",
-            &[("02.jpg", b"TWO"), ("01.jpg", b"ONE")],
-        );
+        let path = write_zip("cbz_fallback", &[("02.jpg", b"TWO"), ("01.jpg", b"ONE")]);
         let cover = cover_bytes(&path).unwrap();
         assert_eq!(cover.name, "01.jpg"); // natural first
         assert_eq!(cover.bytes, b"ONE");
@@ -578,10 +572,7 @@ mod tests {
 
     #[test]
     fn cb7_cover_falls_back_to_first_image() {
-        let path = write_7z(
-            "cb7_fallback",
-            &[("02.jpg", b"TWO"), ("01.jpg", b"ONE")],
-        );
+        let path = write_7z("cb7_fallback", &[("02.jpg", b"TWO"), ("01.jpg", b"ONE")]);
         let cover = cover_bytes(&path).unwrap();
         assert_eq!(cover.name, "01.jpg");
         assert_eq!(cover.bytes, b"ONE");
@@ -613,10 +604,7 @@ mod tests {
     #[cfg(feature = "rar")]
     #[test]
     fn cbr_cover_falls_back_to_first_image() {
-        let path = write_rar4(
-            "cbr_fallback",
-            &[("02.jpg", b"TWO"), ("01.jpg", b"ONE")],
-        );
+        let path = write_rar4("cbr_fallback", &[("02.jpg", b"TWO"), ("01.jpg", b"ONE")]);
         let cover = cover_bytes(&path).unwrap();
         assert_eq!(cover.name, "01.jpg");
         assert_eq!(cover.bytes, b"ONE");
