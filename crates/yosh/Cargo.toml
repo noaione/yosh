@@ -25,7 +25,23 @@ rfd = "0.17"
 # the info-overlay format probe, and egui cover thumbnails; `jxl-oxide` only to
 # name a JXL's pixel format in that overlay (the engine does the real decode);
 # `fast_image_resize` for the thumbnail Resizer; `natord` to sort library volumes.
-image = "0.25"
+image = { version = "0.25", default-features = false, features = [
+    "rayon",
+    "avif",
+    "bmp",
+    "dds",
+    "exr",
+    "ff",
+    "gif",
+    "hdr",
+    "ico",
+    "jpeg",
+    "png",
+    "pnm",
+    "qoi",
+    "tga",
+    "tiff"
+] }
 jxl-oxide = { version = "0.12", default-features = false }
 fast_image_resize = "6"
 natord = "1"
@@ -66,3 +82,8 @@ winresource = "0.1"
 # dav1d (or a vendored build): `cargo build --release -p yosh --features avif`.
 # Forwarded to the engine, which owns the decode path (image/avif-native).
 avif = ["yosh-engine/avif"]
+# WebP SIMD (wpd's assembly kernels). OFF by default so the standard
+# `cargo build` needs no assembler/C toolchain. Enabling it requires nasm on
+# x86-64: `cargo build --release -p yosh --features wpd-simd`. Forwarded to the
+# engine, which owns the decoder (`wpd-simd = ["wpd/asm"]`).
+wpd-simd = ["yosh-engine/wpd-simd"]

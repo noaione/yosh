@@ -17,12 +17,29 @@ rar = ["dep:unrar"]
 # standard build needs no C toolchain. The `yosh` app forwards its own `avif`
 # feature to this one. Enabling requires nasm + dav1d (see CI).
 avif = ["image/avif-native"]
+wpd-simd = ["wpd/asm"]
 
 [dependencies]
 wgpu = "29.0.3"
 pollster = "0.4"
 bytemuck = { version = "1", features = ["derive"] }
-image = "0.25"
+image = { version = "0.25", default-features = false, features = [
+    "rayon",
+    "avif",
+    "bmp",
+    "dds",
+    "exr",
+    "ff",
+    "gif",
+    "hdr",
+    "ico",
+    "jpeg",
+    "png",
+    "pnm",
+    "qoi",
+    "tga",
+    "tiff"
+] }
 png = "0.18"
 jpeg-decoder = "0.3"
 # Pure-Rust JPEG XL decoder (no C toolchain). default-features = false keeps
@@ -37,6 +54,7 @@ qcms = "0.3"
 ogsov = { path = "../ogsov" }
 # ICO container parsing (multi-image .ico → layered pages) and re-encoding.
 ico = "0.5"
+wpd = { git = "https://github.com/halidecx/wpd", rev = "45d5955260f6c44a1b6bea6954a4a34e818f3f8a", default-features = false, features = ["threads"] }
 natord = "1"
 # Archive page sources: zip/cbz (parallel reads), rar/cbr + 7z/cb7 (sequential —
 # a reader thread decompresses into an in-memory map served to readers).
@@ -59,3 +77,12 @@ crc32fast = "1"
 # `Reader` — which needs a Device/Queue — with no GPU and no windowing. Resolver 2
 # keeps this feature out of every non-test build of the crate.
 wgpu = { version = "29.0.3", features = ["noop"] }
+# `benches/webp.rs` compares the wpd WebP decoder against the `image` crate's
+# pure-Rust WebP backend (`image-webp`, the crate `image`'s `webp` feature
+# wraps). Both are dev-only — the shipping build links neither.
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+image-webp = "0.2"
+
+[[bench]]
+name = "webp"
+harness = false

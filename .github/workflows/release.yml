@@ -50,7 +50,7 @@ jobs:
 
       # --- AVIF needs dav1d (C). Build it from source + statically link so the
       # shipped binaries are self-contained; local/default builds stay C-free and
-      # only CI passes --features avif. Built fresh each release (~2 min; not
+      # only CI passes --features avif,wpd-simd. Built fresh each release (~2 min; not
       # cached — GitHub caches are ref-scoped, so a tag run can't reuse them).
       # Recipe mirrors dav1d-rs's own CI, plus static + (Windows) /MT to match
       # the +crt-static Rust build. ---
@@ -86,10 +86,37 @@ jobs:
         shell: pwsh
         run: |
           choco install nasm -y --no-progress
-          "C:\Program Files\NASM" | Out-File $env:GITHUB_PATH -Append -Encoding utf8
+          $env:PATH = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+          $nasm = (Get-Command nasm.exe -ErrorAction SilentlyContinue).Source
+          if (-not $nasm) {
+            $found = Get-ChildItem -Path "$env:ProgramFiles\NASM", "${env:ProgramFiles(x86)}\NASM" -Filter nasm.exe -Recurse -ErrorAction SilentlyContinue
+            $nasm = ($found | Select-Object -First 1).FullName
+          }
+          if (-not $nasm) { throw "nasm.exe not found after 'choco install nasm'" }
+          "NASM=$nasm" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          (Split-Path -Parent $nasm) | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          & $nasm -v
       - name: Install nasm (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get install -y nasm
+
+      - name: Put MSVC toolchain on PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products '*' `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $vsPath) { throw "vswhere found no Visual Studio with the C++ toolset" }
+          $msvcBin = Get-ChildItem "$vsPath\VC\Tools\MSVC" -Directory |
+            ForEach-Object { Join-Path $_.FullName 'bin\Hostx64\x64' } |
+            Where-Object { Test-Path (Join-Path $_ 'lib.exe') } |
+            Select-Object -First 1
+          if (-not $msvcBin) { throw "lib.exe not found under $vsPath\VC\Tools\MSVC" }
+          $msvcBin | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          Write-Host "MSVC x64 bin on PATH: $msvcBin"
+
       - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
@@ -141,7 +168,7 @@ jobs:
           }
 
       - name: Build
-        run: cargo build --release -p yosh --features avif
+        run: cargo build --release -p yosh --features avif,wpd-simd
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
 
@@ -149,7 +176,7 @@ jobs:
         if: runner.os == 'Windows'
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
-        run: cargo build --release -p yosh-thumbnail --features avif
+        run: cargo build --release -p yosh-thumbnail --features avif,wpd-simd
 
       - name: Package
         shell: bash

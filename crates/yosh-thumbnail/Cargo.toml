@@ -16,10 +16,30 @@ crate-type = ["cdylib", "rlib"]
 # Off by default so a plain build needs no C toolchain; the CI release build
 # enables it alongside the app.
 avif = ["yosh-engine/avif"]
+# WebP SIMD (wpd's assembly kernels). OFF by default so the standard
+# `cargo build` needs no assembler/C toolchain. Enabling it requires nasm on
+# x86-64; the engine owns the decoder and receives the feature.
+wpd-simd = ["yosh-engine/wpd-simd"]
 
 [dev-dependencies]
 # Build fixture (CBZ) archives and tiny PNG cover images for the COM tests.
-image = "0.25"
+image = { version = "0.25", default-features = false, features = [
+    "rayon",
+    "avif",
+    "bmp",
+    "dds",
+    "exr",
+    "ff",
+    "gif",
+    "hdr",
+    "ico",
+    "jpeg",
+    "png",
+    "pnm",
+    "qoi",
+    "tga",
+    "tiff"
+] }
 zip = "8"
 
 [dependencies]
