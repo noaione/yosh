@@ -21,10 +21,12 @@ jobs:
         uses: actions/checkout@4f1f4aec02e41874fa0262ea8ff5172d7978ad1e # v7.0.0
 
       # winit/rfd need the desktop dev libs at build time (same set release.yml uses).
+      # nasm assembles wpd's x86-64 SIMD kernels (its default `asm` feature) —
+      # without it wpd's build script panics on x86_64 Linux.
       - name: Install Linux build deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libwayland-dev libx11-dev pkg-config
+          sudo apt-get install -y libgtk-3-dev libxkbcommon-dev libwayland-dev libx11-dev pkg-config nasm
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88

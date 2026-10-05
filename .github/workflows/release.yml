@@ -45,6 +45,20 @@ jobs:
           choco install pkgconfiglite -y --no-progress
           pkg-config --version
 
+      # wpd's build script assembles its x86-64 SIMD kernels with nasm (its
+      # default `asm` feature); the runner image does not ship it. The nasm
+      # package runs an installer that edits the registry PATH, which the running
+      # shell has not reloaded — so refresh it, then publish nasm's directory to
+      # GITHUB_PATH for the build steps.
+      - name: Install nasm
+        shell: pwsh
+        run: |
+          choco install nasm -y --no-progress
+          $env:PATH = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+          $nasm = (Get-Command nasm -ErrorAction Stop).Source
+          Split-Path $nasm | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          nasm -v
+
       - name: Install dav1d with vcpkg
         shell: pwsh
         run: |
