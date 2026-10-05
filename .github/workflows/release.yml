@@ -47,17 +47,24 @@ jobs:
 
       # wpd's build script assembles its x86-64 SIMD kernels with nasm (enabled by
       # the `wpd-simd` feature in the Build step below); the runner image does not
-      # ship it. The nasm package runs an installer that edits the registry PATH,
-      # which the running shell has not reloaded — so refresh it, then publish
-      # nasm's directory to GITHUB_PATH for the build.
+      # ship it. The package's installer only edits the machine registry PATH,
+      # which the runner's cached environment never reloads — so resolve nasm.exe
+      # here and hand nasm-rs its exact path via `NASM` (which nasm-rs reads
+      # first), as well as putting it on PATH.
       - name: Install nasm
         shell: pwsh
         run: |
           choco install nasm -y --no-progress
           $env:PATH = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
-          $nasm = (Get-Command nasm -ErrorAction Stop).Source
-          Split-Path $nasm | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
-          nasm -v
+          $nasm = (Get-Command nasm.exe -ErrorAction SilentlyContinue).Source
+          if (-not $nasm) {
+            $found = Get-ChildItem -Path "$env:ProgramFiles\NASM", "${env:ProgramFiles(x86)}\NASM" -Filter nasm.exe -Recurse -ErrorAction SilentlyContinue
+            $nasm = ($found | Select-Object -First 1).FullName
+          }
+          if (-not $nasm) { throw "nasm.exe not found after 'choco install nasm'" }
+          "NASM=$nasm" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          (Split-Path -Parent $nasm) | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          & $nasm -v
 
       - name: Install dav1d with vcpkg
         shell: pwsh
@@ -87,6 +94,7 @@ jobs:
         env:
           RUSTFLAGS: -C target-feature=+crt-static
         run: |
+          Write-Host "nasm: $env:NASM"
           cargo build --release -p yosh --features avif,wpd-simd
           cargo build --release -p yosh-thumbnail --features avif,wpd-simd
 
