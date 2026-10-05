@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # ruff: file-ignore[os-path-dirname, os-path-join, os-path-abspath, builtin-open, os-remove, os-path-exists]
-"""Generate the CMYK test fixtures under this directory.
+"""Generate the CMYK + WebP test fixtures under this directory.
 
 Requirements:
   - Pillow (with ImageCms / lcms2 bindings) for the JPEG fixtures + references
+  - Pillow's WebP plugin (libwebp) for the WebP fixtures
   - the libjxl `cjxl` CLI on PATH for the JXL fixtures
   - gcc + libjpeg-turbo headers/libs for the YCCK JPEG fixture (see _ycck_enc.c)
 
@@ -13,6 +14,9 @@ Fixture provenance:
     from the Windows color directory (C:\\Windows\\System32\\spool\\drivers\\color).
   - cmyk_ycck.jpg is written by _ycck_enc.c (libjpeg-turbo, JCS_YCCK + Adobe
     APP14 transform=2) from CMYK patches converted to YCbCr+K here.
+  - webp_still.webp / webp_anim.webp are synthetic lossless WebP images (a solid
+    still and a three-frame animation) written by Pillow's libwebp plugin; the
+    wpd decoder tests rely on them being lossless so pixels come back exactly.
   - All images are synthetic patch grids generated here; no copyrighted content.
 
 Regenerate everything with:  python make_fixtures.py
@@ -174,7 +178,37 @@ def jpeg_ycck(path):
     open(us_path, "wb").write(bytes(out))
 
 
+def webp_fixtures():
+    """Write the lossless WebP fixtures for the wpd decoder tests.
+
+    Both are lossless so the tests can assert exact pixels: a solid 8x6 still
+    (10,20,30) and a three-frame animation of full-canvas solid primaries at
+    100 ms per frame. Full-canvas opaque frames make compositing unambiguous —
+    each composited frame is exactly its own solid color.
+    """
+    Image.new("RGBA", (8, 6), (10, 20, 30, 255)).save(
+        os.path.join(HERE, "webp_still.webp"), "WEBP", lossless=True, method=4
+    )
+
+    frames = [
+        Image.new("RGBA", (8, 6), (255, 0, 0, 255)),
+        Image.new("RGBA", (8, 6), (0, 255, 0, 255)),
+        Image.new("RGBA", (8, 6), (0, 0, 255, 255)),
+    ]
+    frames[0].save(
+        os.path.join(HERE, "webp_anim.webp"),
+        "WEBP",
+        save_all=True,
+        append_images=frames[1:],
+        duration=100,
+        loop=0,
+        lossless=True,
+    )
+
+
 def main():
+    webp_fixtures()
+
     grid = patch_grid(PATCHES)
     neutral = patch_grid(NEUTRAL)
 

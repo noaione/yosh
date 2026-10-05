@@ -19,8 +19,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use fast_image_resize::images::{Image, ImageRef};
 use fast_image_resize::{FilterType, PixelType, ResizeAlg, ResizeOptions, Resizer};
 use image::codecs::gif::GifDecoder;
-use image::codecs::webp::WebPDecoder;
 use image::{AnimationDecoder, ImageDecoder};
+use wpd::{
+    api::Decoder as WebPDecoder, image::Format as WebpImageFormat, options::Options as WebPOptions,
+};
 
 use crate::icc;
 use crate::tone;
@@ -482,6 +484,60 @@ fn decode_psd(bytes: &[u8]) -> Result<Decoded, String> {
     Ok((w, h, false, psd.rgba(), None))
 }
 
+/// WebP signature: a RIFF container whose form type is `WEBP`.
+fn is_webp(bytes: &[u8]) -> bool {
+    bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP"
+}
+
+/// Copy a wpd [`Picture`](wpd::api::Picture)'s packed RGBA plane into a
+/// `width × height × 4` buffer. For the packed `Rgba` format `row` yields exactly
+/// `width * 4` tightly-packed bytes (no per-row padding).
+fn copy_webp_rgba(picture: &wpd::api::Picture<'_>) -> Result<(u32, u32, Vec<u8>), String> {
+    let w = u32::try_from(picture.width())
+        .map_err(|_| format!("wpd: negative width {}", picture.width()))?;
+    let h = u32::try_from(picture.height())
+        .map_err(|_| format!("wpd: negative height {}", picture.height()))?;
+    let mut pixels = Vec::with_capacity((w as usize) * (h as usize) * 4);
+    for y in 0..picture.rows(0) {
+        pixels.extend_from_slice(picture.row(0, y));
+    }
+    Ok((w, h, pixels))
+}
+
+/// Decode a WebP **still** with the pure-Rust `wpd` decoder (halidecx/wpd), which
+/// is markedly faster than the `image`/libwebp path. Always normalized to RGBA8
+/// (WebP has no single-channel storage); the color detection downstream can still
+/// collapse a visually-gray page to the gray path. The ICCP chunk, if any, is
+/// returned so a tagged WebP color-manages to sRGB like the other formats.
+fn decode_webp(bytes: &[u8]) -> Result<Decoded, String> {
+    let mut decoder = WebPDecoder::new();
+    decoder
+        .set_format(WebpImageFormat::Rgba)
+        .map_err(|e| format!("wpd format error: {e}"))?;
+    decoder
+        .set_options(WebPOptions::default())
+        .map_err(|e| format!("wpd options error: {e}"))?;
+    decoder
+        .open(bytes)
+        .map_err(|e| format!("wpd open error: {e}"))?;
+
+    // Read metadata before borrowing the decoder for the frame; `metadata`
+    // returns a slice tied to `&mut self`, so copy it out immediately.
+    let icc_profile = decoder
+        .metadata(wpd::api::Metadata::Iccp)
+        .map(<[u8]>::to_vec);
+
+    // `next_frame` borrows the decoder; copy the pixels out before it drops.
+    let picture = decoder
+        .next_frame()
+        .map_err(|e| format!("wpd decode error: {e}"))?
+        .ok_or("wpd: no frame decoded")?;
+    let (w, h, pixels) = copy_webp_rgba(&picture)?;
+
+    // webp can't be "gray"
+    Ok((w, h, false, pixels, icc_profile))
+}
+
 fn decode_other(bytes: &[u8]) -> Result<Decoded, String> {
     let guessed = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
@@ -596,6 +652,8 @@ fn decode_raw(bytes: &[u8]) -> Result<Decoded, String> {
         decode_jxl(bytes)
     } else if bytes.starts_with(b"8BPS") {
         decode_psd(bytes)
+    } else if is_webp(bytes) {
+        decode_webp(bytes)
     } else {
         decode_other(bytes)
     }
@@ -1003,11 +1061,12 @@ fn downscale_rgba_frame(
     downscale_color(&rgba, w, h, tw, th, resizer)
 }
 
-/// Turn an animation's decoded frames into a `DecodedPage`: downscale each frame
-/// (color path) and keep its delay. The decoder (`GifDecoder` / `WebPDecoder`)
-/// hands back each frame **pre-composited to the full canvas** (disposal already
-/// applied), so each is a complete same-size RGBA image. A single frame collapses
-/// to `Still` so a non-animated file pays no animation overhead.
+/// Turn a GIF animation's decoded frames into a `DecodedPage`: downscale each
+/// frame (color path) and keep its delay. `GifDecoder` hands back each frame
+/// **pre-composited to the full canvas** (disposal already applied), so each is a
+/// complete same-size RGBA image. A single frame collapses to `Still` so a
+/// non-animated file pays no animation overhead. (WebP animations stream through
+/// [`decode_webp_animated`] instead, in the same shape.)
 fn frames_to_page(
     frames: Vec<image::Frame>,
     target_h: u32,
@@ -1030,6 +1089,51 @@ fn frames_to_page(
             downscale_rgba_frame(buf.into_raw(), w, h, target_h, resizer)?,
             delay,
         ));
+    }
+    if out.len() == 1 {
+        Ok(DecodedPage::Still(out.pop().unwrap().0))
+    } else {
+        Ok(DecodedPage::Animated(out))
+    }
+}
+
+/// Decode an animated WebP into a `DecodedPage` with the `wpd` decoder. wpd's
+/// default `Animation::Composited` mode hands back each frame already composited
+/// onto the full canvas (blend + dispose applied), so every picture is a complete
+/// same-size RGBA image — the same shape [`frames_to_page`] gets from a GIF.
+/// wpd reports frame durations in milliseconds; they are clamped exactly like GIF
+/// delays (sub-20 ms → 100 ms) so a zero-delay frame can't pin the loop.
+fn decode_webp_animated(
+    bytes: &[u8],
+    target_h: u32,
+    resizer: &mut Resizer,
+) -> Result<DecodedPage, String> {
+    let mut decoder = WebPDecoder::new();
+    decoder
+        .set_format(WebpImageFormat::Rgba)
+        .map_err(|e| format!("wpd format error: {e}"))?;
+    decoder
+        .set_options(WebPOptions::default())
+        .map_err(|e| format!("wpd options error: {e}"))?;
+    decoder
+        .open(bytes)
+        .map_err(|e| format!("wpd open error: {e}"))?;
+
+    let mut out: Vec<(DecodedImage, u32)> = Vec::new();
+    while let Some(picture) = decoder
+        .next_frame()
+        .map_err(|e| format!("wpd frame error: {e}"))?
+    {
+        let (w, h, pixels) = copy_webp_rgba(&picture)?;
+        let ms = u32::try_from(picture.duration()).unwrap_or(0);
+        let delay = if ms < 20 { 100 } else { ms };
+        out.push((
+            downscale_rgba_frame(pixels, w, h, target_h, resizer)?,
+            delay,
+        ));
+    }
+    if out.is_empty() {
+        return Err("webp: animation decoded no frames".into());
     }
     if out.len() == 1 {
         Ok(DecodedPage::Still(out.pop().unwrap().0))
@@ -1110,19 +1214,15 @@ pub fn decode_page_with_options(
             .map_err(|e| format!("gif frames: {e}"))?;
         return frames_to_page(frames, target_h, resizer);
     }
-    // WebP: frame-decode only when it's actually animated; a static WebP takes the
-    // normal still path (with ICC color management) like any other image.
-    if bytes.len() >= 12
-        && &bytes[0..4] == b"RIFF"
-        && &bytes[8..12] == b"WEBP"
-        && let Ok(dec) = WebPDecoder::new(std::io::Cursor::new(bytes))
-        && dec.has_animation()
+    // WebP: stills go through `decode_raw` → `decode_webp` (the full HQ path with
+    // ICC management + color detection); only an animated file is frame-decoded
+    // here, via wpd's composited animation loop. `wpd::api::info` is a cheap
+    // container scan (no pixel decode), so a still pays almost nothing for it.
+    if is_webp(bytes)
+        && let Ok(info) = wpd::api::info(bytes)
+        && info.is_animation
     {
-        let frames = dec
-            .into_frames()
-            .collect_frames()
-            .map_err(|e| format!("webp frames: {e}"))?;
-        return frames_to_page(frames, target_h, resizer);
+        return decode_webp_animated(bytes, target_h, resizer);
     }
     // Stills: the seek hot path. LQ uses the fast gamma-space resize; HQ is the
     // unchanged linear-light pipeline. (Animations/ICO above always decode HQ —
@@ -1354,6 +1454,71 @@ mod tests {
             decode_page(&bytes, 4, false, &mut resizer).unwrap(),
             DecodedPage::Still(_)
         ));
+    }
+
+    /// The still WebP fixture is lossless, so decoding it must return the exact
+    /// pixels — the whole point of the decoder swap (the old stub returned an
+    /// empty buffer).
+    #[test]
+    fn webp_still_decodes_pixels_via_wpd() {
+        const STILL: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/testdata/webp_still.webp"
+        ));
+        assert!(is_webp(STILL), "fixture must sniff as WebP");
+
+        // Native size: the decoded pixels come straight back.
+        let mut resizer = Resizer::new();
+        match decode_page(STILL, 6, false, &mut resizer).unwrap() {
+            DecodedPage::Still(d) => {
+                assert_eq!((d.w, d.h), (8, 6));
+                assert!(!d.gray, "webp has no grayscale storage");
+                assert_eq!(
+                    d.pixels.len(),
+                    8 * 6 * 4,
+                    "real pixels, not an empty buffer"
+                );
+                assert_eq!(&d.pixels[0..4], &[10, 20, 30, 255]);
+            }
+            _ => panic!("a still webp should decode to Still"),
+        }
+
+        // A smaller target takes the normal HQ downscale path.
+        let mut resizer = Resizer::new();
+        match decode_page(STILL, 3, false, &mut resizer).unwrap() {
+            DecodedPage::Still(d) => {
+                assert_eq!((d.w, d.h), (4, 3));
+                assert_eq!(d.pixels.len(), 4 * 3 * 4);
+            }
+            _ => panic!("a still webp should decode to Still"),
+        }
+    }
+
+    /// An animated WebP decodes through the wpd composited frame loop (not the
+    /// still path), preserving frame order, colors, and millisecond delays.
+    #[test]
+    fn webp_animation_decodes_via_wpd() {
+        const ANIM: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/testdata/webp_anim.webp"
+        ));
+        assert!(is_webp(ANIM));
+
+        let mut resizer = Resizer::new();
+        match decode_page(ANIM, 6, false, &mut resizer).unwrap() {
+            DecodedPage::Animated(frames) => {
+                assert_eq!(frames.len(), 3, "all composited frames kept");
+                let rgb = |i: usize| {
+                    let img = &frames[i].0;
+                    [img.pixels[0], img.pixels[1], img.pixels[2], img.pixels[3]]
+                };
+                assert_eq!(rgb(0), [255, 0, 0, 255]);
+                assert_eq!(rgb(1), [0, 255, 0, 255]);
+                assert_eq!(rgb(2), [0, 0, 255, 255]);
+                assert!(frames.iter().all(|(_, d)| *d == 100), "100 ms delays");
+            }
+            _ => panic!("an animated webp should decode to Animated"),
+        }
     }
 
     /// A minimal 4×4, 8-bit RGB PSD with raw (uncompressed) merged image data:

@@ -19,7 +19,23 @@ avif = ["yosh-engine/avif"]
 
 [dev-dependencies]
 # Build fixture (CBZ) archives and tiny PNG cover images for the COM tests.
-image = "0.25"
+image = { version = "0.25", default-features = false, features = [
+    "rayon",
+    "avif",
+    "bmp",
+    "dds",
+    "exr",
+    "ff",
+    "gif",
+    "hdr",
+    "ico",
+    "jpeg",
+    "png",
+    "pnm",
+    "qoi",
+    "tga",
+    "tiff"
+] }
 zip = "8"
 
 [dependencies]

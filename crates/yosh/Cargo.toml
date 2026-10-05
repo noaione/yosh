@@ -25,7 +25,23 @@ rfd = "0.17"
 # the info-overlay format probe, and egui cover thumbnails; `jxl-oxide` only to
 # name a JXL's pixel format in that overlay (the engine does the real decode);
 # `fast_image_resize` for the thumbnail Resizer; `natord` to sort library volumes.
-image = "0.25"
+image = { version = "0.25", default-features = false, features = [
+    "rayon",
+    "avif",
+    "bmp",
+    "dds",
+    "exr",
+    "ff",
+    "gif",
+    "hdr",
+    "ico",
+    "jpeg",
+    "png",
+    "pnm",
+    "qoi",
+    "tga",
+    "tiff"
+] }
 jxl-oxide = { version = "0.12", default-features = false }
 fast_image_resize = "6"
 natord = "1"

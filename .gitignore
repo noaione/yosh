@@ -3,3 +3,5 @@
 __pycache__
 
 *.npz
+*.cb[zr7]
+.DS_Store

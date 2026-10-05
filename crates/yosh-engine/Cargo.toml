@@ -22,7 +22,23 @@ avif = ["image/avif-native"]
 wgpu = "29.0.3"
 pollster = "0.4"
 bytemuck = { version = "1", features = ["derive"] }
-image = "0.25"
+image = { version = "0.25", default-features = false, features = [
+    "rayon",
+    "avif",
+    "bmp",
+    "dds",
+    "exr",
+    "ff",
+    "gif",
+    "hdr",
+    "ico",
+    "jpeg",
+    "png",
+    "pnm",
+    "qoi",
+    "tga",
+    "tiff"
+] }
 png = "0.18"
 jpeg-decoder = "0.3"
 # Pure-Rust JPEG XL decoder (no C toolchain). default-features = false keeps
@@ -37,6 +53,7 @@ qcms = "0.3"
 ogsov = { path = "../ogsov" }
 # ICO container parsing (multi-image .ico → layered pages) and re-encoding.
 ico = "0.5"
+wpd = { git = "https://github.com/halidecx/wpd", rev = "45d5955260f6c44a1b6bea6954a4a34e818f3f8a" }
 natord = "1"
 # Archive page sources: zip/cbz (parallel reads), rar/cbr + 7z/cb7 (sequential —
 # a reader thread decompresses into an in-memory map served to readers).
