@@ -28,9 +28,15 @@ cargo test  -p yosh spread                             # run a subset of tests b
 
 - `<path>` = a folder of images, or a `.cbz/.zip`, `.cbr/.rar`, or `.7z/.cb7` archive. No arg → library grid / keys overlay.
 - **The default build needs no C toolchain** — all decoders are pure-Rust (`png`, `jpeg-decoder`,
-  `image`, `qcms`), TLS for self-update is `ureq` over rustls+**ring** (not aws-lc). **Preserve this.**
-  The one exception is AVIF, gated behind an off-by-default feature:
-  `cargo build --release -p yosh --features avif` (needs `nasm` + `dav1d`).
+  `image`, `qcms`; WebP via `wpd`), TLS for self-update is `ureq` over rustls+**ring** (not aws-lc).
+  **Preserve this.** Two features are *opt-in* and each needs `nasm` **on x86-64 only** (aarch64/ARM
+  assemble with `cc`):
+  - `avif` — AVIF via the `image` crate's dav1d backend (needs `nasm` + `dav1d`):
+    `cargo build --release -p yosh --features avif`.
+  - `wpd-simd` — WebP SIMD (engine-side `wpd-simd = ["wpd/asm"]`). `wpd` is pulled with
+    `default-features = false, features = ["threads"]`, and its build script returns immediately when
+    `asm` is off — so the default build invokes no assembler and no C compiler:
+    `cargo build --release -p yosh --features wpd-simd`.
 - No rustfmt/clippy config, no toolchain pin; edition 2024 (uses let-chains). Standard `cargo fmt` / `cargo clippy`.
 - Release builds are GUI-subsystem on Windows (`#![cfg_attr(not(debug_assertions), windows_subsystem="windows")]`),
   so no console on double-click; `main.rs::reattach_console()` rebinds stdio to the parent console when

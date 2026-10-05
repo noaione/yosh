@@ -28,7 +28,7 @@ cargo run --release -p yosh -- "<path>" [start_page]
 `<path>` is a folder of images, or a `.cbz/.zip`, `.cbr/.rar`, or `.7z/.cb7` archive. With no argument,
 yosh opens the library grid (if a library folder was set) or shows the keys overlay.
 
-Default `cargo build` needs no system libraries (pure-Rust decoders).
+Default `cargo build` needs no system libraries or C toolchain — every decoder is pure Rust.
 
 ## Formats
 - Sources: image folders, CBZ/ZIP, CBR/RAR (UnRAR), 7z/CB7.
@@ -76,6 +76,18 @@ the standard build stays toolchain-free:
 ```sh
 cargo build --release -p yosh --features avif   # requires nasm + dav1d (or a vendored build)
 ```
+
+## WebP SIMD (optional)
+WebP decode uses the pure-Rust `wpd` decoder. Its SIMD kernels sit behind an off-by-default feature,
+so the standard build stays toolchain-free:
+
+```sh
+cargo build --release -p yosh --features wpd-simd   # requires nasm on x86-64
+```
+
+On x86-64 the kernels are assembled with `nasm`; on aarch64 they use the C compiler you already have
+(Apple silicon / ARM Linux / Android need nothing extra). Combine features as usual, e.g.
+`--features avif,wpd-simd`.
 
 ## Benchmarks
 `crates/decode_bench` and `crates/present_bench` are the throwaway spikes that validated the throughput

@@ -202,7 +202,7 @@ impl Decoders {
             d.read_image(&mut self.scratch)
                 .expect("image-webp read_image");
             self.out.reserve(n * 4);
-            for px in self.scratch.chunks_exact(3) {
+            for px in self.scratch.as_chunks::<3>().0 {
                 self.out.extend_from_slice(&[px[0], px[1], px[2], 255]);
             }
         }

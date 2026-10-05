@@ -45,11 +45,11 @@ jobs:
           choco install pkgconfiglite -y --no-progress
           pkg-config --version
 
-      # wpd's build script assembles its x86-64 SIMD kernels with nasm (its
-      # default `asm` feature); the runner image does not ship it. The nasm
-      # package runs an installer that edits the registry PATH, which the running
-      # shell has not reloaded — so refresh it, then publish nasm's directory to
-      # GITHUB_PATH for the build steps.
+      # wpd's build script assembles its x86-64 SIMD kernels with nasm (enabled by
+      # the `wpd-simd` feature in the Build step below); the runner image does not
+      # ship it. The nasm package runs an installer that edits the registry PATH,
+      # which the running shell has not reloaded — so refresh it, then publish
+      # nasm's directory to GITHUB_PATH for the build.
       - name: Install nasm
         shell: pwsh
         run: |
@@ -87,8 +87,8 @@ jobs:
         env:
           RUSTFLAGS: -C target-feature=+crt-static
         run: |
-          cargo build --release -p yosh --features avif
-          cargo build --release -p yosh-thumbnail --features avif
+          cargo build --release -p yosh --features avif,wpd-simd
+          cargo build --release -p yosh-thumbnail --features avif,wpd-simd
 
       - name: Package executable and portable zip
         shell: pwsh
@@ -161,7 +161,7 @@ jobs:
           fi
 
       - name: Build
-        run: cargo build --release -p yosh --features avif
+        run: cargo build --release -p yosh --features avif,wpd-simd
 
       - name: Package
         run: cp target/release/yosh yosh-linux-x64
@@ -203,7 +203,7 @@ jobs:
           fi
 
       - name: Build
-        run: cargo build --release -p yosh --features avif --target aarch64-apple-darwin
+        run: cargo build --release -p yosh --features avif,wpd-simd --target aarch64-apple-darwin
 
       - name: Package
         run: cp target/aarch64-apple-darwin/release/yosh yosh-macos-arm64

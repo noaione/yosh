@@ -81,3 +81,8 @@ winresource = "0.1"
 # dav1d (or a vendored build): `cargo build --release -p yosh --features avif`.
 # Forwarded to the engine, which owns the decode path (image/avif-native).
 avif = ["yosh-engine/avif"]
+# WebP SIMD (wpd's assembly kernels). OFF by default so the standard
+# `cargo build` needs no assembler/C toolchain. Enabling it requires nasm on
+# x86-64: `cargo build --release -p yosh --features wpd-simd`. Forwarded to the
+# engine, which owns the decoder (`wpd-simd = ["wpd/asm"]`).
+wpd-simd = ["yosh-engine/wpd-simd"]

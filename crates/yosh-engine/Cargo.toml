@@ -17,6 +17,7 @@ rar = ["dep:unrar"]
 # standard build needs no C toolchain. The `yosh` app forwards its own `avif`
 # feature to this one. Enabling requires nasm + dav1d (see CI).
 avif = ["image/avif-native"]
+wpd-simd = ["wpd/asm"]
 
 [dependencies]
 wgpu = "29.0.3"
@@ -53,7 +54,7 @@ qcms = "0.3"
 ogsov = { path = "../ogsov" }
 # ICO container parsing (multi-image .ico → layered pages) and re-encoding.
 ico = "0.5"
-wpd = { git = "https://github.com/halidecx/wpd", rev = "45d5955260f6c44a1b6bea6954a4a34e818f3f8a" }
+wpd = { git = "https://github.com/halidecx/wpd", rev = "45d5955260f6c44a1b6bea6954a4a34e818f3f8a", default-features = false, features = ["threads"] }
 natord = "1"
 # Archive page sources: zip/cbz (parallel reads), rar/cbr + 7z/cb7 (sequential —
 # a reader thread decompresses into an in-memory map served to readers).
