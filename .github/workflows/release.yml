@@ -66,6 +66,29 @@ jobs:
           (Split-Path -Parent $nasm) | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
           & $nasm -v
 
+      # nasm-rs doesn't stop at nasm: after assembling the .o files it packages
+      # them into a static library by spawning the MSVC archiver under its *bare*
+      # name, `lib`. The runner keeps the MSVC toolchain off PATH (rustc finds
+      # link.exe itself via vswhere), so that spawn is what actually fails with
+      # "nasm failed: failed to spawn process: program not found" — even though
+      # nasm was found and ran fine. Put the x64 MSVC bin dir (lib.exe plus the
+      # DLLs it loads, which live alongside it) on PATH for the build.
+      - name: Put MSVC toolchain on PATH
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products '*' `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $vsPath) { throw "vswhere found no Visual Studio with the C++ toolset" }
+          $msvcBin = Get-ChildItem "$vsPath\VC\Tools\MSVC" -Directory |
+            ForEach-Object { Join-Path $_.FullName 'bin\Hostx64\x64' } |
+            Where-Object { Test-Path (Join-Path $_ 'lib.exe') } |
+            Select-Object -First 1
+          if (-not $msvcBin) { throw "lib.exe not found under $vsPath\VC\Tools\MSVC" }
+          $msvcBin | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          Write-Host "MSVC x64 bin on PATH: $msvcBin"
+
       - name: Install dav1d with vcpkg
         shell: pwsh
         run: |
