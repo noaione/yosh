@@ -76,3 +76,12 @@ crc32fast = "1"
 # `Reader` — which needs a Device/Queue — with no GPU and no windowing. Resolver 2
 # keeps this feature out of every non-test build of the crate.
 wgpu = { version = "29.0.3", features = ["noop"] }
+# `benches/webp.rs` compares the wpd WebP decoder against the `image` crate's
+# pure-Rust WebP backend (`image-webp`, the crate `image`'s `webp` feature
+# wraps). Both are dev-only — the shipping build links neither.
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+image-webp = "0.2"
+
+[[bench]]
+name = "webp"
+harness = false
