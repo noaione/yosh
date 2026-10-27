@@ -269,6 +269,35 @@ fn jpeg_uses_adobe_inverted_cmyk(bytes: &[u8]) -> bool {
     false
 }
 
+/// BT.601 full-range YCbCr -> RGB, the matrix every JPEG decoder uses.
+fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8) -> (u8, u8, u8) {
+    let y = y as f32;
+    let cb = cb as f32 - 128.0;
+    let cr = cr as f32 - 128.0;
+    let clamp = |value: f32| value.round().clamp(0.0, 255.0) as u8;
+    (
+        clamp(y + 1.402 * cr),
+        clamp(y - 0.344_136 * cb - 0.714_136 * cr),
+        clamp(y + 1.772 * cb),
+    )
+}
+
+/// Convert Adobe YCCK samples (`Y, Cb, Cr, K` with K inverted) to opaque RGBA8.
+///
+/// Adobe stores the display colour's YCbCr plus an *inverted* K (255 = no black
+/// ink), unlike its conventional CMYK siblings, so the display colour is
+/// `YCbCr -> RGB` scaled by `K / 255`.
+fn ycck_to_rgba(ycck: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(ycck.len());
+    for px in ycck.as_chunks::<4>().0 {
+        let (r, g, b) = ycbcr_to_rgb(px[0], px[1], px[2]);
+        let coverage = px[3] as u32;
+        let scale = |value: u8| ((value as u32 * coverage + 127) / 255) as u8;
+        out.extend_from_slice(&[scale(r), scale(g), scale(b), 255]);
+    }
+    out
+}
+
 /// Generic fallback for CMYK JPEGs without a usable embedded profile: convert
 /// conventional-ink samples to opaque RGBA8 with the classic ink model
 /// (poppler's `cmyk2rgb`): `R = (255 − C)·(255 − K)/255` — white paper stays
@@ -379,8 +408,12 @@ fn decode_jpeg(bytes: &[u8]) -> Result<Decoded, String> {
     let (output, gray) = match input {
         ColorSpace::Luma => (ColorSpace::Luma, true),
         ColorSpace::CMYK => (ColorSpace::CMYK, false),
-        // YCCK is converted directly to RGB by zune-jpeg. Other color JPEGs
-        // also use RGB output so their samples are normalized consistently.
+        // zune-jpeg's YCCK -> RGB conversion inverts the colour channels
+        // (`(255 - rgb) * k`), which turns an Adobe YCCK page into its negative.
+        // Ask for the raw four samples instead and convert them below, where the
+        // Adobe convention (K inverted: 255 = no black ink) is explicit.
+        ColorSpace::YCCK => (ColorSpace::YCCK, false),
+        // Other color JPEGs use RGB output so their samples are normalized.
         _ => (ColorSpace::RGB, false),
     };
     d.set_options(d.options().jpeg_set_out_colorspace(output));
@@ -399,15 +432,16 @@ fn decode_jpeg(bytes: &[u8]) -> Result<Decoded, String> {
     }
 
     if input == ColorSpace::YCCK {
-        if pixels.len() != n * 3 {
+        if pixels.len() != n * 4 {
             return Err(format!(
                 "jpeg: ycck buffer {} bytes for {w}x{h} ({n} px)",
                 pixels.len()
             ));
         }
-        // YCCK is already converted to display RGB, including its K channel.
-        // Its CMYK ICC profile does not describe these RGB samples.
-        return Ok((w, h, false, rgb_to_rgba(&pixels, w, h), None));
+        // Adobe YCCK: the first three samples are the display colour's YCbCr and
+        // K is inverted (255 = no black ink), so display = YCbCr->RGB scaled by
+        // K/255. Its CMYK ICC profile does not describe the RGB samples.
+        return Ok((w, h, false, ycck_to_rgba(&pixels), None));
     }
 
     if input == ColorSpace::CMYK {
@@ -1778,6 +1812,22 @@ mod tests {
                 &want[..],
                 "fallback({input:?}, ycck={ycck}) — RGBA ordering + alpha 255"
             );
+        }
+    }
+
+    #[test]
+    fn ycck_samples_follow_the_adobe_convention() {
+        // (Y, Cb, Cr, K): Adobe stores display YCbCr and an inverted K, so the
+        // display colour is YCbCr->RGB scaled by K/255.
+        let cases: &[([u8; 4], [u8; 4])] = &[
+            ([255, 128, 128, 255], [255, 255, 255, 255]), // white, no black ink
+            ([0, 128, 128, 0], [0, 0, 0, 255]),           // black, full black ink
+            ([179, 171, 1, 255], [1, 255, 255, 255]),     // cyan
+            ([255, 128, 128, 128], [128, 128, 128, 255]), // white at half coverage
+        ];
+        for (input, want) in cases {
+            let rgba = ycck_to_rgba(input);
+            assert_eq!(&rgba[..], &want[..], "ycck_to_rgba({input:?})");
         }
     }
 
