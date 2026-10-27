@@ -80,7 +80,9 @@ pub static ES: Strings = Strings {
     info_detection_not_run: "no ejecutada",
     info_detection_source_gray: "origen en escala de grises",
     info_detection_traditional: |state| format!("Tradicional · {state}"),
-    info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · confianza: {confidence} %"),
+    info_detection_ogsov: |state, confidence| {
+        format!("OGSOV · {state} · confianza: {confidence} %")
+    },
     info_detection_unavailable: "OGSOV no disponible (faltan los pesos)",
     info_detection_transparent: "no ejecutada (imagen transparente)",
     color_state_color: "color",
@@ -150,7 +152,10 @@ pub static ES: Strings = Strings {
                 ("S", "una página ↔ doble página"),
                 ("D", "dirección de lectura  der.→izq. ↔ izq.→der."),
                 ("C", "desplazamiento vertical continuo"),
-                ("O", "desplazar emparejamiento (corrige páginas mal emparejadas)"),
+                (
+                    "O",
+                    "desplazar emparejamiento (corrige páginas mal emparejadas)",
+                ),
             ],
         },
         HelpSection {
@@ -159,15 +164,24 @@ pub static ES: Strings = Strings {
                 ("+ / −", "zoom (una tecla de vista restablece el zoom)"),
                 ("arrastrar", "desplazar"),
                 ("Ctrl+rueda", "zoom en el cursor (mismos pasos que + / −)"),
-                ("Z", "ampliar páginas pequeñas (no: el ajuste se detiene al 100% nativo)"),
+                (
+                    "Z",
+                    "ampliar páginas pequeñas (no: el ajuste se detiene al 100% nativo)",
+                ),
                 ("J", "ir a la página"),
                 ("R", "rotar 90° (en sentido horario)"),
                 ("I", "mostrar información de la imagen"),
                 ("B", "mostrar/ocultar la barra de progreso inferior"),
                 ("T", "transición de página (deslizar + fundido)"),
-                ("V", "activar/desactivar la sombra del lomo en páginas dobles"),
+                (
+                    "V",
+                    "activar/desactivar la sombra del lomo en páginas dobles",
+                ),
                 ("⚙ Ajustes", "sombra del lomo en doble página"),
-                ("G", "mostrar/ocultar el panel de animación (GIF / WebP animados)"),
+                (
+                    "G",
+                    "mostrar/ocultar el panel de animación (GIF / WebP animados)",
+                ),
                 ("F11", "pantalla completa"),
                 ("Esc", "salir"),
             ],
@@ -175,9 +189,18 @@ pub static ES: Strings = Strings {
         HelpSection {
             title: "Archivos",
             rows: &[
-                ("E", "mostrar en el Explorador (abre la carpeta y selecciona el archivo)"),
-                ("barra superior", "Abrir carpeta / Abrir archivo;  Biblioteca ↔ Lector;  ⚙ Ajustes"),
-                ("arrastrar y soltar", "una carpeta, archivo o imagen sobre la ventana"),
+                (
+                    "E",
+                    "mostrar en el Explorador (abre la carpeta y selecciona el archivo)",
+                ),
+                (
+                    "barra superior",
+                    "Abrir carpeta / Abrir archivo;  Biblioteca ↔ Lector;  ⚙ Ajustes",
+                ),
+                (
+                    "arrastrar y soltar",
+                    "una carpeta, archivo o imagen sobre la ventana",
+                ),
                 ("F1", "mostrar/ocultar esta ayuda"),
             ],
         },
@@ -195,7 +218,10 @@ pub static ES: Strings = Strings {
     color_detection_ml: "ML",
     color_detection_weights_missing: "Los pesos de OGSOV no están incluidos en esta versión",
     perf_auto_now: |tier, battery| {
-        format!("Automático — ahora {tier} ({})", if battery { "con batería" } else { "conectado" })
+        format!(
+            "Automático — ahora {tier} ({})",
+            if battery { "con batería" } else { "conectado" }
+        )
     },
 
     // --- desktop: onboarding, library header, file dialogs ---
@@ -309,18 +335,51 @@ pub static ES: Strings = Strings {
         drag_zoom: "Arrastrar — desplazar; Ctrl+rueda — ampliar bajo el cursor",
         drop_files: "Arrastra una carpeta, archivo o imagen a la ventana",
         help_footer: "Puedes personalizar los atajos en ⌨ Atajos de teclado.",
-        categories: ["Navegación", "Vista", "Ventanas e información", "Biblioteca y archivos", "Aplicación"],
+        categories: [
+            "Navegación",
+            "Vista",
+            "Ventanas e información",
+            "Biblioteca y archivos",
+            "Aplicación",
+        ],
         actions: [
-            "Página siguiente", "Página anterior", "Izquierda (según dirección)", "Derecha (según dirección)",
-            "Primera página", "Última página", "Cambiar ajuste", "Cambiar dirección de lectura", "Cambiar página simple/doble",
-            "Cambiar modo de desplazamiento", "Acercar", "Alejar", "Ajustar a ventana", "Ajustar al ancho", "100 % (1:1)",
-            "Doble página I→D", "Doble página D→I", "Mostrar/ocultar ayuda", "Pantalla completa", "Cambiar emparejamiento",
-            "Mostrar/ocultar información", "Mostrar/ocultar barra de progreso", "Ir a página", "Cambiar transición de página",
-            "Estirar páginas pequeñas", "Mostrar/ocultar sombra del lomo", "Panel de animación", "Volumen anterior",
-            "Volumen siguiente", "Girar 90°", "Mostrar en el Explorador", "Salir/Cerrar",
+            "Página siguiente",
+            "Página anterior",
+            "Izquierda (según dirección)",
+            "Derecha (según dirección)",
+            "Primera página",
+            "Última página",
+            "Cambiar ajuste",
+            "Cambiar dirección de lectura",
+            "Cambiar página simple/doble",
+            "Cambiar modo de desplazamiento",
+            "Acercar",
+            "Alejar",
+            "Ajustar a ventana",
+            "Ajustar al ancho",
+            "100 % (1:1)",
+            "Doble página I→D",
+            "Doble página D→I",
+            "Mostrar/ocultar ayuda",
+            "Pantalla completa",
+            "Cambiar emparejamiento",
+            "Mostrar/ocultar información",
+            "Mostrar/ocultar barra de progreso",
+            "Ir a página",
+            "Cambiar transición de página",
+            "Estirar páginas pequeñas",
+            "Mostrar/ocultar sombra del lomo",
+            "Panel de animación",
+            "Volumen anterior",
+            "Volumen siguiente",
+            "Girar 90°",
+            "Mostrar en el Explorador",
+            "Salir/Cerrar",
         ],
         status_set: |action, binding| format!("{action} → {binding}"),
-        status_conflict: |action| format!("Conflicto con «{action}» — quítalo o reasígnalo primero"),
+        status_conflict: |action| {
+            format!("Conflicto con «{action}» — quítalo o reasígnalo primero")
+        },
         status_cleared: |action| format!("Asignaciones de {action} borradas"),
         status_reset: |action| format!("{action} restablecido"),
         status_reset_all: "Todos los atajos restablecidos",

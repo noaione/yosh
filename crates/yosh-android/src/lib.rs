@@ -33,7 +33,7 @@ use winit::window::{Window, WindowId};
 
 use yosh_engine::gesture::{GestureCtx, GestureEvent, Phase, TouchGestures};
 use yosh_engine::gpu::GpuContext;
-use yosh_engine::i18n::{self, tr, Lang};
+use yosh_engine::i18n::{self, Lang, tr};
 use yosh_engine::layout::Layout;
 use yosh_engine::page::{FitMode, PagePipeline};
 use yosh_engine::pool::{DecodePool, Waker};
@@ -621,7 +621,9 @@ fn walk_series(dir: &Path, depth: usize, out: &mut Vec<Series>) -> bool {
         }
     }
     if !volumes.is_empty() {
-        volumes.sort_by(|a, b| natord::compare(&name_of(a).to_lowercase(), &name_of(b).to_lowercase()));
+        volumes.sort_by(|a, b| {
+            natord::compare(&name_of(a).to_lowercase(), &name_of(b).to_lowercase())
+        });
         // Captions drop the head the whole series repeats, so they're a per-series
         // computation — done here, on the scan thread, never per frame.
         let names: Vec<String> = volumes.iter().map(|p| name_of(p)).collect();
@@ -1483,7 +1485,9 @@ impl Shell {
         if ev.state != ElementState::Pressed {
             return;
         }
-        let PhysicalKey::Code(code) = ev.physical_key else { return };
+        let PhysicalKey::Code(code) = ev.physical_key else {
+            return;
+        };
         let Some(app) = self.app.as_ref() else {
             // No reader yet: still let the rocker work.
             if let Some(adj) = volume_adjust(code) {
@@ -2337,7 +2341,8 @@ fn load_view(path: &Path) -> InitView {
         // Color detection is appended after volume keys and language. Older OGSOV
         // builds stored it in slot 12 before those settings existed. `off` is
         // ambiguous with the existing volume-key value, so preserve the latter.
-        let legacy_width_layout = t.len() == 13 && t.get(12).and_then(|v| v.parse::<i32>().ok()).is_some();
+        let legacy_width_layout =
+            t.len() == 13 && t.get(12).and_then(|v| v.parse::<i32>().ok()).is_some();
         let color_slot = if t.len() >= 14 {
             t.get(13)
         } else if legacy_width_layout {
@@ -2517,7 +2522,11 @@ fn install_fonts(ctx: &egui::Context, cjk_face: u32) {
     if let Some(cjk) = cjk_font(cjk_face) {
         fonts.font_data.insert("cjk".to_owned(), cjk);
         for fam in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-            fonts.families.entry(fam).or_default().push("cjk".to_owned());
+            fonts
+                .families
+                .entry(fam)
+                .or_default()
+                .push("cjk".to_owned());
         }
     }
     ctx.set_fonts(fonts);
@@ -2999,17 +3008,15 @@ fn empty_state(
                         *open_library = true;
                     }
                     if ui
-                        .add(egui::Button::new(egui::RichText::new(tr().open_file).size(18.0)))
+                        .add(egui::Button::new(
+                            egui::RichText::new(tr().open_file).size(18.0),
+                        ))
                         .clicked()
                     {
                         *open_picker = true;
                     }
                     ui.add_space(2.0);
-                    ui.label(
-                        egui::RichText::new(tr().tap_top_tip)
-                            .size(12.0)
-                            .color(weak),
-                    );
+                    ui.label(egui::RichText::new(tr().tap_top_tip).size(12.0).color(weak));
                 });
             });
         });
@@ -3151,16 +3158,24 @@ fn book_prompt_card(
                 ui.vertical_centered(|ui| {
                     if !has_sibling {
                         ui.label(
-                            egui::RichText::new(if dir > 0 { tr().last_page } else { tr().first_page })
-                                .size(18.0)
-                                .strong(),
+                            egui::RichText::new(if dir > 0 {
+                                tr().last_page
+                            } else {
+                                tr().first_page
+                            })
+                            .size(18.0)
+                            .strong(),
                         );
                         return;
                     }
                     ui.label(
-                        egui::RichText::new(if dir > 0 { tr().next_book } else { tr().previous_book })
-                            .size(18.0)
-                            .strong(),
+                        egui::RichText::new(if dir > 0 {
+                            tr().next_book
+                        } else {
+                            tr().previous_book
+                        })
+                        .size(18.0)
+                        .strong(),
                     );
                     ui.add_space(8.0);
                     let cover_w = BOOK_PROMPT_W_PT - 24.0;
@@ -3178,10 +3193,12 @@ fn book_prompt_card(
                         .clicked()
                     };
                     ui.add_space(6.0);
-                    ui.add(
-                        egui::Label::new(egui::RichText::new(title).size(14.0)).truncate(),
+                    ui.add(egui::Label::new(egui::RichText::new(title).size(14.0)).truncate());
+                    ui.label(
+                        egui::RichText::new(tr().tap_again_to_open)
+                            .size(12.0)
+                            .weak(),
                     );
-                    ui.label(egui::RichText::new(tr().tap_again_to_open).size(12.0).weak());
                     if clicked {
                         *book_nav = dir;
                     }
@@ -3361,315 +3378,371 @@ fn options_popup(
                 // runs off both edges (the top rows were unreachable). The cap keeps
                 // the card clear of the status bar given the -40pt anchor offset.
                 let max_h = ctx.viewport_rect().height() - 80.0 - 2.0 * (top_inset + 16.0);
-                egui::ScrollArea::vertical().max_height(max_h.max(160.0)).show(ui, |ui| {
-                    ui.label(egui::RichText::new(t.reading_mode).strong());
-                    ui.horizontal(|ui| {
-                        if ui
-                            .selectable_label(!scroll_on, egui::RichText::new(t.page_flip).size(16.0))
-                            .clicked()
-                        {
-                            *set_scroll = Some(false);
-                        }
-                        if ui
-                            .selectable_label(scroll_on, egui::RichText::new(t.scroll).size(16.0))
-                            .clicked()
-                        {
-                            *set_scroll = Some(true);
-                        }
-                    });
-
-                    ui.label(egui::RichText::new(t.reading_direction).strong());
-                    ui.horizontal(|ui| {
-                        if ui
-                            .selectable_label(dir == Direction::Ltr, egui::RichText::new(t.dir_ltr).size(16.0))
-                            .clicked()
-                        {
-                            *set_dir = Some(Direction::Ltr);
-                        }
-                        if ui
-                            .selectable_label(dir == Direction::Rtl, egui::RichText::new(t.dir_rtl).size(16.0))
-                            .clicked()
-                        {
-                            *set_dir = Some(Direction::Rtl);
-                        }
-                    });
-
-                    ui.label(egui::RichText::new(t.page_layout).strong());
-                    ui.horizontal(|ui| {
-                        for (m, text) in [
-                            (LayoutMode::Single, t.single),
-                            (LayoutMode::Spread, t.two_page),
-                            (LayoutMode::Auto, t.auto),
-                        ] {
-                            if ui
-                                .selectable_label(layout == m, egui::RichText::new(text).size(16.0))
-                                .clicked()
-                            {
-                                *set_layout = Some(m);
-                            }
-                        }
-                    });
-                    // Auto resolves to single in portrait and two-page in landscape.
-                    if layout == LayoutMode::Auto {
-                        ui.label(
-                            egui::RichText::new(t.layout_auto_hint)
-                                .size(12.0)
-                                .color(egui::Color32::from_white_alpha(150)),
-                        );
-                    }
-                    // Shift which pages are paired together (e.g. so a cover sits alone).
-                    // Shown whenever the *effective* layout is a spread (incl. Auto-landscape).
-                    if effective_spread
-                        && ui
-                            .button(egui::RichText::new(t.shift_page_pairing).size(16.0))
-                            .clicked()
-                    {
-                        *toggle_offset = true;
-                    }
-
-                    ui.label(egui::RichText::new(t.fit).strong());
-                    ui.horizontal(|ui| {
-                        for (f, text) in [
-                            (FitMode::Window, t.fit_window_opt),
-                            (FitMode::Width, t.fit_width_opt),
-                            (FitMode::Height, t.fit_height_opt),
-                            (FitMode::Actual, "1:1"),
-                        ] {
-                            if ui
-                                .selectable_label(fit == f, egui::RichText::new(text).size(16.0))
-                                .clicked()
-                            {
-                                *set_fit = Some(f);
-                            }
-                        }
-                    });
-
-                    // Sits directly under the fit choices because it *modifies* them:
-                    // it bounds every fit at 100% native rather than being a fit of its
-                    // own (issue #13). Same row and wording as the desktop panel.
-                    ui.label(egui::RichText::new(t.stretch_small_pages).strong());
-                    ui.horizontal(|ui| {
-                        if ui
-                            .selectable_label(stretch_on, egui::RichText::new(t.on).size(16.0))
-                            .clicked()
-                        {
-                            *set_no_upscale = Some(false);
-                        }
-                        if ui
-                            .selectable_label(!stretch_on, egui::RichText::new(t.off).size(16.0))
-                            .clicked()
-                        {
-                            *set_no_upscale = Some(true);
-                        }
-                    });
-                    ui.label(
-                        egui::RichText::new(t.stretch_hint)
-                            .size(12.0)
-                            .color(egui::Color32::from_white_alpha(150)),
-                    );
-
-                    // Manual page rotation (single-page draws only — the engine ignores
-                    // it for spreads). Per-comic and transient: not persisted, reset to
-                    // upright on the next open, exactly like the desktop `R` key.
-                    ui.label(egui::RichText::new(t.rotation).strong());
-                    if ui
-                        .button(egui::RichText::new((t.rotate_now)(rotation as u32 * 90)).size(16.0))
-                        .clicked()
-                    {
-                        *rotate = true;
-                    }
-
-                    ui.label(egui::RichText::new(t.page_turn_animation).strong());
-                    ui.horizontal(|ui| {
-                        if ui
-                            .selectable_label(transition_on, egui::RichText::new(t.on).size(16.0))
-                            .clicked()
-                        {
-                            *set_transition = Some(true);
-                        }
-                        if ui
-                            .selectable_label(!transition_on, egui::RichText::new(t.off).size(16.0))
-                            .clicked()
-                        {
-                            *set_transition = Some(false);
-                        }
-                    });
-
-                    // Book-gutter shading only means anything on an un-joined pair, so
-                    // show it with the other spread-only controls' gate.
-                    if effective_spread {
-                        ui.label(egui::RichText::new(t.spine_shadow).strong());
+                egui::ScrollArea::vertical()
+                    .max_height(max_h.max(160.0))
+                    .show(ui, |ui| {
+                        ui.label(egui::RichText::new(t.reading_mode).strong());
                         ui.horizontal(|ui| {
                             if ui
-                                .selectable_label(spine_on, egui::RichText::new(t.on).size(16.0))
+                                .selectable_label(
+                                    !scroll_on,
+                                    egui::RichText::new(t.page_flip).size(16.0),
+                                )
                                 .clicked()
                             {
-                                *set_spine_on = Some(true);
+                                *set_scroll = Some(false);
                             }
                             if ui
-                                .selectable_label(!spine_on, egui::RichText::new(t.off).size(16.0))
+                                .selectable_label(
+                                    scroll_on,
+                                    egui::RichText::new(t.scroll).size(16.0),
+                                )
                                 .clicked()
                             {
-                                *set_spine_on = Some(false);
+                                *set_scroll = Some(true);
                             }
                         });
-                        let mut strength = spine_strength;
-                        if ui
-                            .add_enabled(
-                                spine_on,
-                                egui::Slider::new(&mut strength, 0.0..=1.0)
-                                    .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
-                                    .text(t.strength),
-                            )
-                            .changed()
-                        {
-                            *set_spine_strength = Some(strength);
-                        }
-                        let mut width = spine_width;
-                        if ui
-                            .add_enabled(
-                                spine_on,
-                                egui::Slider::new(&mut width, 0.25..=1.0)
-                                    .step_by(0.25)
-                                    .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
-                                    .text(t.spine_shadow_width),
-                            )
-                            .changed()
-                        {
-                            *set_spine_width = Some(width);
-                        }
-                    }
 
-                    ui.label(egui::RichText::new(t.resume_on_startup).strong());
-                    ui.horizontal(|ui| {
-                        if ui
-                            .selectable_label(resume_on, egui::RichText::new(t.on).size(16.0))
-                            .clicked()
-                        {
-                            *set_resume = Some(true);
-                        }
-                        if ui
-                            .selectable_label(!resume_on, egui::RichText::new(t.off).size(16.0))
-                            .clicked()
-                        {
-                            *set_resume = Some(false);
-                        }
-                    });
-
-                    // Hardware page turning (issue #16). Arrow / PageUp / PageDown /
-                    // media keys always flip; the volume rocker is opt-in because
-                    // it takes the buttons away from the volume while a book is open.
-                    ui.label(egui::RichText::new(t.vol_keys).strong());
-                    ui.horizontal(|ui| {
-                        for (v, text) in [
-                            (VolKeys::Off, t.off),
-                            (VolKeys::DownNext, t.vol_down_next),
-                            (VolKeys::UpNext, t.vol_up_next),
-                        ] {
+                        ui.label(egui::RichText::new(t.reading_direction).strong());
+                        ui.horizontal(|ui| {
                             if ui
-                                .selectable_label(vol_keys == v, egui::RichText::new(text).size(16.0))
+                                .selectable_label(
+                                    dir == Direction::Ltr,
+                                    egui::RichText::new(t.dir_ltr).size(16.0),
+                                )
                                 .clicked()
                             {
-                                *set_vol_keys = Some(v);
+                                *set_dir = Some(Direction::Ltr);
                             }
-                        }
-                    });
-                    ui.label(
-                        egui::RichText::new(t.vol_keys_hint)
-                            .size(12.0)
-                            .color(egui::Color32::from_white_alpha(150)),
-                    );
+                            if ui
+                                .selectable_label(
+                                    dir == Direction::Rtl,
+                                    egui::RichText::new(t.dir_rtl).size(16.0),
+                                )
+                                .clicked()
+                            {
+                                *set_dir = Some(Direction::Rtl);
+                            }
+                        });
 
-                    // A dropdown, not a row of buttons: the list only grows. Each
-                    // language is listed in its own script, so it's findable whatever
-                    // the UI is currently showing. Rows are padded for touch.
-                    ui.label(egui::RichText::new(t.language).strong());
-                    egui::ComboBox::from_id_salt("language")
-                        .selected_text(
-                            egui::RichText::new(i18n::lang_pref_label(lang_pref)).size(16.0),
-                        )
-                        .width(260.0)
-                        .show_ui(ui, |ui| {
-                            ui.spacing_mut().button_padding = egui::vec2(16.0, 12.0);
-                            let item = |text: &str| egui::RichText::new(text).size(18.0);
-                            if ui.selectable_label(lang_pref.is_none(), item(t.lang_system)).clicked() {
-                                *set_lang = Some(None);
+                        ui.label(egui::RichText::new(t.page_layout).strong());
+                        ui.horizontal(|ui| {
+                            for (m, text) in [
+                                (LayoutMode::Single, t.single),
+                                (LayoutMode::Spread, t.two_page),
+                                (LayoutMode::Auto, t.auto),
+                            ] {
+                                if ui
+                                    .selectable_label(
+                                        layout == m,
+                                        egui::RichText::new(text).size(16.0),
+                                    )
+                                    .clicked()
+                                {
+                                    *set_layout = Some(m);
+                                }
                             }
-                            for l in Lang::ALL {
-                                if ui.selectable_label(lang_pref == Some(l), item(l.native_name())).clicked() {
-                                    *set_lang = Some(Some(l));
+                        });
+                        // Auto resolves to single in portrait and two-page in landscape.
+                        if layout == LayoutMode::Auto {
+                            ui.label(
+                                egui::RichText::new(t.layout_auto_hint)
+                                    .size(12.0)
+                                    .color(egui::Color32::from_white_alpha(150)),
+                            );
+                        }
+                        // Shift which pages are paired together (e.g. so a cover sits alone).
+                        // Shown whenever the *effective* layout is a spread (incl. Auto-landscape).
+                        if effective_spread
+                            && ui
+                                .button(egui::RichText::new(t.shift_page_pairing).size(16.0))
+                                .clicked()
+                        {
+                            *toggle_offset = true;
+                        }
+
+                        ui.label(egui::RichText::new(t.fit).strong());
+                        ui.horizontal(|ui| {
+                            for (f, text) in [
+                                (FitMode::Window, t.fit_window_opt),
+                                (FitMode::Width, t.fit_width_opt),
+                                (FitMode::Height, t.fit_height_opt),
+                                (FitMode::Actual, "1:1"),
+                            ] {
+                                if ui
+                                    .selectable_label(
+                                        fit == f,
+                                        egui::RichText::new(text).size(16.0),
+                                    )
+                                    .clicked()
+                                {
+                                    *set_fit = Some(f);
                                 }
                             }
                         });
 
-                    ui.label(egui::RichText::new(t.theme).strong());
-                    ui.horizontal(|ui| {
-                        for (t, text) in [
-                            (ThemePref::System, t.theme_system),
-                            (ThemePref::Light, t.theme_light),
-                            (ThemePref::Dark, t.theme_dark),
-                        ] {
+                        // Sits directly under the fit choices because it *modifies* them:
+                        // it bounds every fit at 100% native rather than being a fit of its
+                        // own (issue #13). Same row and wording as the desktop panel.
+                        ui.label(egui::RichText::new(t.stretch_small_pages).strong());
+                        ui.horizontal(|ui| {
                             if ui
-                                .selectable_label(theme == t, egui::RichText::new(text).size(16.0))
+                                .selectable_label(stretch_on, egui::RichText::new(t.on).size(16.0))
                                 .clicked()
                             {
-                                *set_theme = Some(t);
+                                *set_no_upscale = Some(false);
                             }
-                        }
-                    });
+                            if ui
+                                .selectable_label(
+                                    !stretch_on,
+                                    egui::RichText::new(t.off).size(16.0),
+                                )
+                                .clicked()
+                            {
+                                *set_no_upscale = Some(true);
+                            }
+                        });
+                        ui.label(
+                            egui::RichText::new(t.stretch_hint)
+                                .size(12.0)
+                                .color(egui::Color32::from_white_alpha(150)),
+                        );
 
-                    // One profile, not individual knobs: the budget's fields are
-                    // interdependent. Auto = the hardware probe; the rest pin a tier
-                    // (Performance = no ceilings, i.e. the desktop configuration).
-                    ui.label(egui::RichText::new(t.performance).strong());
-                    ui.horizontal(|ui| {
-                        for (p, text) in [
-                            (PerfPref::Auto, t.perf_auto),
-                            (PerfPref::Low, t.perf_low),
-                            (PerfPref::Mid, t.perf_mid),
-                            (PerfPref::High, t.perf_high),
-                        ] {
+                        // Manual page rotation (single-page draws only — the engine ignores
+                        // it for spreads). Per-comic and transient: not persisted, reset to
+                        // upright on the next open, exactly like the desktop `R` key.
+                        ui.label(egui::RichText::new(t.rotation).strong());
+                        if ui
+                            .button(
+                                egui::RichText::new((t.rotate_now)(rotation as u32 * 90))
+                                    .size(16.0),
+                            )
+                            .clicked()
+                        {
+                            *rotate = true;
+                        }
+
+                        ui.label(egui::RichText::new(t.page_turn_animation).strong());
+                        ui.horizontal(|ui| {
                             if ui
-                                .selectable_label(perf == p, egui::RichText::new(text).size(16.0))
+                                .selectable_label(
+                                    transition_on,
+                                    egui::RichText::new(t.on).size(16.0),
+                                )
                                 .clicked()
                             {
-                                *set_perf = Some(p);
+                                *set_transition = Some(true);
+                            }
+                            if ui
+                                .selectable_label(
+                                    !transition_on,
+                                    egui::RichText::new(t.off).size(16.0),
+                                )
+                                .clicked()
+                            {
+                                *set_transition = Some(false);
+                            }
+                        });
+
+                        // Book-gutter shading only means anything on an un-joined pair, so
+                        // show it with the other spread-only controls' gate.
+                        if effective_spread {
+                            ui.label(egui::RichText::new(t.spine_shadow).strong());
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .selectable_label(
+                                        spine_on,
+                                        egui::RichText::new(t.on).size(16.0),
+                                    )
+                                    .clicked()
+                                {
+                                    *set_spine_on = Some(true);
+                                }
+                                if ui
+                                    .selectable_label(
+                                        !spine_on,
+                                        egui::RichText::new(t.off).size(16.0),
+                                    )
+                                    .clicked()
+                                {
+                                    *set_spine_on = Some(false);
+                                }
+                            });
+                            let mut strength = spine_strength;
+                            if ui
+                                .add_enabled(
+                                    spine_on,
+                                    egui::Slider::new(&mut strength, 0.0..=1.0)
+                                        .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                                        .text(t.strength),
+                                )
+                                .changed()
+                            {
+                                *set_spine_strength = Some(strength);
+                            }
+                            let mut width = spine_width;
+                            if ui
+                                .add_enabled(
+                                    spine_on,
+                                    egui::Slider::new(&mut width, 0.25..=1.0)
+                                        .step_by(0.25)
+                                        .custom_formatter(|v, _| format!("{:.0}%", v * 100.0))
+                                        .text(t.spine_shadow_width),
+                                )
+                                .changed()
+                            {
+                                *set_spine_width = Some(width);
                             }
                         }
-                    });
-                    ui.label(
-                        egui::RichText::new(t.perf_hint)
-                        .size(12.0)
-                        .color(egui::Color32::from_white_alpha(150)),
-                    );
-                    ui.label(egui::RichText::new(t.color_page_detection).strong());
-                    ui.horizontal(|ui| {
-                        for (mode, text) in [
-                            (ColorDetectionPref::Off, t.off),
-                            (
-                                ColorDetectionPref::Traditional,
-                                t.color_detection_traditional,
-                            ),
-                            (ColorDetectionPref::Ml, t.color_detection_ml),
-                        ] {
-                            let enabled = mode != ColorDetectionPref::Ml
-                                || yosh_engine::decode::ml_color_detection_available();
-                            let response = ui.add_enabled(
-                                enabled,
-                                egui::Button::selectable(
-                                    color_detection == mode,
-                                    egui::RichText::new(text).size(16.0),
+
+                        ui.label(egui::RichText::new(t.resume_on_startup).strong());
+                        ui.horizontal(|ui| {
+                            if ui
+                                .selectable_label(resume_on, egui::RichText::new(t.on).size(16.0))
+                                .clicked()
+                            {
+                                *set_resume = Some(true);
+                            }
+                            if ui
+                                .selectable_label(!resume_on, egui::RichText::new(t.off).size(16.0))
+                                .clicked()
+                            {
+                                *set_resume = Some(false);
+                            }
+                        });
+
+                        // Hardware page turning (issue #16). Arrow / PageUp / PageDown /
+                        // media keys always flip; the volume rocker is opt-in because
+                        // it takes the buttons away from the volume while a book is open.
+                        ui.label(egui::RichText::new(t.vol_keys).strong());
+                        ui.horizontal(|ui| {
+                            for (v, text) in [
+                                (VolKeys::Off, t.off),
+                                (VolKeys::DownNext, t.vol_down_next),
+                                (VolKeys::UpNext, t.vol_up_next),
+                            ] {
+                                if ui
+                                    .selectable_label(
+                                        vol_keys == v,
+                                        egui::RichText::new(text).size(16.0),
+                                    )
+                                    .clicked()
+                                {
+                                    *set_vol_keys = Some(v);
+                                }
+                            }
+                        });
+                        ui.label(
+                            egui::RichText::new(t.vol_keys_hint)
+                                .size(12.0)
+                                .color(egui::Color32::from_white_alpha(150)),
+                        );
+
+                        // A dropdown, not a row of buttons: the list only grows. Each
+                        // language is listed in its own script, so it's findable whatever
+                        // the UI is currently showing. Rows are padded for touch.
+                        ui.label(egui::RichText::new(t.language).strong());
+                        egui::ComboBox::from_id_salt("language")
+                            .selected_text(
+                                egui::RichText::new(i18n::lang_pref_label(lang_pref)).size(16.0),
+                            )
+                            .width(260.0)
+                            .show_ui(ui, |ui| {
+                                ui.spacing_mut().button_padding = egui::vec2(16.0, 12.0);
+                                let item = |text: &str| egui::RichText::new(text).size(18.0);
+                                if ui
+                                    .selectable_label(lang_pref.is_none(), item(t.lang_system))
+                                    .clicked()
+                                {
+                                    *set_lang = Some(None);
+                                }
+                                for l in Lang::ALL {
+                                    if ui
+                                        .selectable_label(
+                                            lang_pref == Some(l),
+                                            item(l.native_name()),
+                                        )
+                                        .clicked()
+                                    {
+                                        *set_lang = Some(Some(l));
+                                    }
+                                }
+                            });
+
+                        ui.label(egui::RichText::new(t.theme).strong());
+                        ui.horizontal(|ui| {
+                            for (t, text) in [
+                                (ThemePref::System, t.theme_system),
+                                (ThemePref::Light, t.theme_light),
+                                (ThemePref::Dark, t.theme_dark),
+                            ] {
+                                if ui
+                                    .selectable_label(
+                                        theme == t,
+                                        egui::RichText::new(text).size(16.0),
+                                    )
+                                    .clicked()
+                                {
+                                    *set_theme = Some(t);
+                                }
+                            }
+                        });
+
+                        // One profile, not individual knobs: the budget's fields are
+                        // interdependent. Auto = the hardware probe; the rest pin a tier
+                        // (Performance = no ceilings, i.e. the desktop configuration).
+                        ui.label(egui::RichText::new(t.performance).strong());
+                        ui.horizontal(|ui| {
+                            for (p, text) in [
+                                (PerfPref::Auto, t.perf_auto),
+                                (PerfPref::Low, t.perf_low),
+                                (PerfPref::Mid, t.perf_mid),
+                                (PerfPref::High, t.perf_high),
+                            ] {
+                                if ui
+                                    .selectable_label(
+                                        perf == p,
+                                        egui::RichText::new(text).size(16.0),
+                                    )
+                                    .clicked()
+                                {
+                                    *set_perf = Some(p);
+                                }
+                            }
+                        });
+                        ui.label(
+                            egui::RichText::new(t.perf_hint)
+                                .size(12.0)
+                                .color(egui::Color32::from_white_alpha(150)),
+                        );
+                        ui.label(egui::RichText::new(t.color_page_detection).strong());
+                        ui.horizontal(|ui| {
+                            for (mode, text) in [
+                                (ColorDetectionPref::Off, t.off),
+                                (
+                                    ColorDetectionPref::Traditional,
+                                    t.color_detection_traditional,
                                 ),
-                            );
-                            if response.clicked() {
-                                *set_color_detection = Some(mode);
+                                (ColorDetectionPref::Ml, t.color_detection_ml),
+                            ] {
+                                let enabled = mode != ColorDetectionPref::Ml
+                                    || yosh_engine::decode::ml_color_detection_available();
+                                let response = ui.add_enabled(
+                                    enabled,
+                                    egui::Button::selectable(
+                                        color_detection == mode,
+                                        egui::RichText::new(text).size(16.0),
+                                    ),
+                                );
+                                if response.clicked() {
+                                    *set_color_detection = Some(mode);
+                                }
+                                if !enabled {
+                                    response.on_hover_text(t.color_detection_weights_missing);
+                                }
                             }
-                            if !enabled {
-                                response.on_hover_text(t.color_detection_weights_missing);
-                            }
-                        }
+                        });
                     });
-                });
             });
         });
 }
@@ -3787,7 +3860,9 @@ fn adjust_volume(app: &AndroidApp, adj: i32) {
 /// if the bridge fails, which resolves to English.
 fn locale_tag(app: &AndroidApp) -> String {
     with_env(app, |env, activity| {
-        let s = env.call_method(activity, "localeTag", "()Ljava/lang/String;", &[])?.l()?;
+        let s = env
+            .call_method(activity, "localeTag", "()Ljava/lang/String;", &[])?
+            .l()?;
         let s = JString::from(s);
         Ok(env.get_string(&s)?.into())
     })
@@ -3952,7 +4027,10 @@ impl App {
         // only on a page change (see `refresh_info_meta`) so this stays per-frame cheap.
         lines.extend(self.info_meta.iter().cloned());
         if let Some(p) = self.reader.cache.get(idx) {
-            lines.push((t.info_source.to_string(), format!("{} × {}", p.src_w, p.src_h)));
+            lines.push((
+                t.info_source.to_string(),
+                format!("{} × {}", p.src_w, p.src_h),
+            ));
             lines.push((t.info_decoded.to_string(), format!("{} × {}", p.w, p.h)));
             lines.push((
                 t.info_resize.to_string(),
@@ -3962,7 +4040,10 @@ impl App {
                     p.path.label().to_string()
                 },
             ));
-            lines.push((t.info_detection.to_string(), p.color_detection.localized_label()));
+            lines.push((
+                t.info_detection.to_string(),
+                p.color_detection.localized_label(),
+            ));
             // Single-resize invariant readout: the GPU should sample 1:1.
             let gpu = match self.reader.page_target_h(idx).cmp(&p.target_h) {
                 std::cmp::Ordering::Equal => "1:1",
@@ -4455,7 +4536,11 @@ impl App {
         // are often CJK) so a long name can't push the other header buttons off-screen.
         let resume_label = (len > 0).then(|| {
             let t = i18n::truncate_cols(&self.book_title, 14);
-            format!("{}  {}", egui_phosphor::fill::BOOK_OPEN, (tr().resume_book)(&t))
+            format!(
+                "{}  {}",
+                egui_phosphor::fill::BOOK_OPEN,
+                (tr().resume_book)(&t)
+            )
         });
         // While the bars are shown the window is still full-bleed (NativeActivity
         // ignores fitSystemWindows), so inset the library's top chrome by the
@@ -4494,7 +4579,10 @@ impl App {
                         // Choose-a-library-root folder browser (folders only).
                         ui.horizontal(|ui| {
                             ui.spacing_mut().button_padding = egui::vec2(14.0, 10.0);
-                            if ui.button(egui::RichText::new(tr().back).size(18.0)).clicked() {
+                            if ui
+                                .button(egui::RichText::new(tr().back).size(18.0))
+                                .clicked()
+                            {
                                 leave_browse = true;
                             }
                             if !at_root
@@ -4552,7 +4640,10 @@ impl App {
                             {
                                 enter_browse = true;
                             }
-                            if ui.button(egui::RichText::new(tr().open_file).size(18.0)).clicked() {
+                            if ui
+                                .button(egui::RichText::new(tr().open_file).size(18.0))
+                                .clicked()
+                            {
                                 reqs.open_picker = true;
                             }
                             if ui.button(egui::RichText::new("⟳").size(18.0)).clicked() {
@@ -4578,8 +4669,7 @@ impl App {
                                 ui.label(
                                     egui::RichText::new(tr().recently_read).size(18.0).strong(),
                                 );
-                                visible_covers
-                                    .extend(recents_cells.iter().map(|v| v.path.clone()));
+                                visible_covers.extend(recents_cells.iter().map(|v| v.path.clone()));
                                 egui::ScrollArea::horizontal()
                                     .id_salt("recents_row")
                                     .scroll_bar_visibility(
@@ -4663,13 +4753,15 @@ impl App {
                 if self.logo.is_none()
                     && let Some(img) = decode_logo()
                 {
-                    self.logo = Some(ctx.load_texture(
-                        "yosh_logo",
-                        img,
-                        egui::TextureOptions::LINEAR,
-                    ));
+                    self.logo =
+                        Some(ctx.load_texture("yosh_logo", img, egui::TextureOptions::LINEAR));
                 }
-                empty_state(ctx, self.logo.as_ref(), &mut reqs.open_library, &mut reqs.open_picker);
+                empty_state(
+                    ctx,
+                    self.logo.as_ref(),
+                    &mut reqs.open_library,
+                    &mut reqs.open_picker,
+                );
             } else if controls {
                 seekbar(
                     ctx,
@@ -4741,12 +4833,18 @@ impl App {
             // Next/prev-book boundary prompt — over the page, chrome or not.
             // (`prompt_card` is None in the library / empty state.)
             if let Some((dir, title, thumb, has_sibling)) = &prompt_card {
-                book_prompt_card(ctx, *dir, rtl, title, thumb.as_ref(), *has_sibling, &mut book_nav);
+                book_prompt_card(
+                    ctx,
+                    *dir,
+                    rtl,
+                    title,
+                    thumb.as_ref(),
+                    *has_sibling,
+                    &mut book_nav,
+                );
             }
             // Page-flip drag drop shadow — over the page, chrome or not.
-            if !library_view
-                && let Some((frac, si)) = drag_seam
-            {
+            if !library_view && let Some((frac, si)) = drag_seam {
                 drag_shadow(ctx, frac, si);
             }
         });

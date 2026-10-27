@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use yosh_engine::i18n::tr;
 
-use crate::library::{series_status, vol_state, LibCtx, Library, VolState};
+use crate::library::{LibCtx, Library, VolState, series_status, vol_state};
 
 #[derive(Default)]
 pub struct UiState {
@@ -145,6 +145,8 @@ pub struct UiState {
     /// in px/s, appended to the info overlay once a touch fling has happened —
     /// makes "no physics" reports diagnosable from a screenshot. None until then.
     pub touch_fling: Option<(f32, f32)>,
+    /// Live decode and sampling path displayed by the info overlay.
+    pub resize_path: String,
     /// Transient toast message (boundary reached, zoom level); None when idle.
     pub toast: Option<String>,
     /// Whether to show the centered loading spinner (the current page's decode
@@ -482,7 +484,14 @@ fn anim_panel(ctx: &egui::Context, st: &mut UiState) {
                                     ));
                                 }
                             }
-                            if btn.on_hover_text(if st.anim_playing { tr().pause } else { tr().play }).clicked() {
+                            if btn
+                                .on_hover_text(if st.anim_playing {
+                                    tr().pause
+                                } else {
+                                    tr().play
+                                })
+                                .clicked()
+                            {
                                 st.anim_req_toggle_play = true;
                             }
                         }
@@ -547,7 +556,9 @@ pub fn chrome(
     let bar = egui::TopBottomPanel::top("top_bar").show_animated(ctx, show_bar, |ui| {
         ui.horizontal(|ui| {
             if ui.button(tr().open_folder).clicked()
-                && let Some(p) = rfd::FileDialog::new().set_title(tr().dlg_open_folder).pick_folder()
+                && let Some(p) = rfd::FileDialog::new()
+                    .set_title(tr().dlg_open_folder)
+                    .pick_folder()
             {
                 st.pending_open = Some(p);
             }
@@ -644,7 +655,11 @@ pub fn chrome(
                             // wide) so a long name can't push the other header
                             // buttons off-screen.
                             let clip = yosh_engine::i18n::truncate_cols(name, 24);
-                            format!("{}  {}", egui_phosphor::fill::BOOK_OPEN, (tr().resume_book)(&clip))
+                            format!(
+                                "{}  {}",
+                                egui_phosphor::fill::BOOK_OPEN,
+                                (tr().resume_book)(&clip)
+                            )
                         }
                         None => format!("{}  {}", egui_phosphor::fill::BOOK_OPEN, tr().resume),
                     };
@@ -744,11 +759,7 @@ pub fn chrome(
                         ui.label(t.hotkeys.drag_zoom);
                         ui.label(t.hotkeys.drop_files);
                         ui.separator();
-                        ui.label(
-                            egui::RichText::new(t.hotkeys.help_footer)
-                                .weak()
-                                .small(),
-                        );
+                        ui.label(egui::RichText::new(t.hotkeys.help_footer).weak().small());
                     });
             });
     }
@@ -799,7 +810,8 @@ pub fn chrome(
                                 }
                                 // Live view state (refreshed every frame, not cached with the page).
                                 ui.label(
-                                    egui::RichText::new(tr().info_zoom).color(egui::Color32::from_gray(150)),
+                                    egui::RichText::new(tr().info_zoom)
+                                        .color(egui::Color32::from_gray(150)),
                                 );
                                 ui.label(
                                     egui::RichText::new(format!("{:.2}%", st.zoom_pct))
@@ -1057,11 +1069,7 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
             if r.drag_stopped() {
                 st.req_scroll_speed_save = true;
             }
-            ui.label(
-                egui::RichText::new(t.scroll_speed_hint)
-                    .weak()
-                    .small(),
-            );
+            ui.label(egui::RichText::new(t.scroll_speed_hint).weak().small());
 
             ui.label(egui::RichText::new(t.reading_direction).strong());
             ui.horizontal(|ui| {
@@ -1078,7 +1086,8 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
                 if ui.selectable_label(!st.layout_spread, t.single).clicked() && st.layout_spread {
                     st.req_toggle_layout = true;
                 }
-                if ui.selectable_label(st.layout_spread, t.two_page).clicked() && !st.layout_spread {
+                if ui.selectable_label(st.layout_spread, t.two_page).clicked() && !st.layout_spread
+                {
                     st.req_toggle_layout = true;
                 }
             });
@@ -1094,7 +1103,10 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
 
             ui.label(egui::RichText::new(t.fit).strong());
             ui.horizontal(|ui| {
-                for (i, text) in [t.fit_window_opt, t.fit_width_opt, t.fit_height_opt, "1:1"].iter().enumerate() {
+                for (i, text) in [t.fit_window_opt, t.fit_width_opt, t.fit_height_opt, "1:1"]
+                    .iter()
+                    .enumerate()
+                {
                     if ui.selectable_label(st.fit_mode == i as u8, *text).clicked() {
                         st.req_set_fit = Some(i as u8);
                     }
@@ -1112,17 +1124,10 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
                     st.req_toggle_stretch = true;
                 }
             });
-            ui.label(
-                egui::RichText::new(t.stretch_hint_key)
-                    .weak()
-                    .small(),
-            );
+            ui.label(egui::RichText::new(t.stretch_hint_key).weak().small());
 
             ui.label(egui::RichText::new(t.rotation).strong());
-            if ui
-                .button((t.rotate_now)(st.rotation as u32 * 90))
-                .clicked()
-            {
+            if ui.button((t.rotate_now)(st.rotation as u32 * 90)).clicked() {
                 st.req_rotate = true;
             }
 
@@ -1147,11 +1152,7 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
                     st.req_spine_toggle = true;
                 }
             });
-            ui.label(
-                egui::RichText::new(t.spine_hint)
-                    .weak()
-                    .small(),
-            );
+            ui.label(egui::RichText::new(t.spine_hint).weak().small());
             // The slider edits a local copy; only a real change raises the request
             // (the app owns the setting and drains it after the frame). The value
             // applies live per change, but the config write waits for the drag to
@@ -1193,10 +1194,14 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
 
             ui.label(egui::RichText::new(t.resume_on_startup).strong());
             ui.horizontal(|ui| {
-                if ui.selectable_label(st.resume_on_startup, t.on).clicked() && !st.resume_on_startup {
+                if ui.selectable_label(st.resume_on_startup, t.on).clicked()
+                    && !st.resume_on_startup
+                {
                     st.req_toggle_resume = true;
                 }
-                if ui.selectable_label(!st.resume_on_startup, t.off).clicked() && st.resume_on_startup {
+                if ui.selectable_label(!st.resume_on_startup, t.off).clicked()
+                    && st.resume_on_startup
+                {
                     st.req_toggle_resume = true;
                 }
             });
@@ -1204,12 +1209,16 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
             if st.resume_on_startup {
                 ui.label(egui::RichText::new(t.resume_start_at_first_page).strong());
                 ui.horizontal(|ui| {
-                    if ui.selectable_label(st.resume_start_at_first_page, t.on).clicked()
+                    if ui
+                        .selectable_label(st.resume_start_at_first_page, t.on)
+                        .clicked()
                         && !st.resume_start_at_first_page
                     {
                         st.req_toggle_resume_start_at_first_page = true;
                     }
-                    if ui.selectable_label(!st.resume_start_at_first_page, t.off).clicked()
+                    if ui
+                        .selectable_label(!st.resume_start_at_first_page, t.off)
+                        .clicked()
                         && st.resume_start_at_first_page
                     {
                         st.req_toggle_resume_start_at_first_page = true;
@@ -1224,11 +1233,17 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
                 .selected_text(yosh_engine::i18n::lang_pref_label(st.lang_pref))
                 .width(200.0)
                 .show_ui(ui, |ui| {
-                    if ui.selectable_label(st.lang_pref.is_none(), t.lang_system).clicked() {
+                    if ui
+                        .selectable_label(st.lang_pref.is_none(), t.lang_system)
+                        .clicked()
+                    {
                         st.req_set_lang = Some(None);
                     }
                     for l in yosh_engine::i18n::Lang::ALL {
-                        if ui.selectable_label(st.lang_pref == Some(l), l.native_name()).clicked() {
+                        if ui
+                            .selectable_label(st.lang_pref == Some(l), l.native_name())
+                            .clicked()
+                        {
                             st.req_set_lang = Some(Some(l));
                         }
                     }
@@ -1388,11 +1403,9 @@ fn hotkeys_window(ctx: &egui::Context, st: &mut UiState) {
                     st.hotkey_req = Some(crate::hotkeys::HotkeyRequest::ResetAll);
                 }
                 ui.label(
-                    egui::RichText::new(
-                        strings.os_shortcuts_hint,
-                    )
-                    .weak()
-                    .small(),
+                    egui::RichText::new(strings.os_shortcuts_hint)
+                        .weak()
+                        .small(),
                 );
             });
         });
@@ -1538,7 +1551,9 @@ fn onboarding(ui: &mut egui::Ui, st: &mut UiState) {
             st.pending_library = Some(p);
         }
         if ui
-            .add(egui::Button::new(egui::RichText::new(tr().open_file).size(18.0)))
+            .add(egui::Button::new(
+                egui::RichText::new(tr().open_file).size(18.0),
+            ))
             .clicked()
             && let Some(p) = rfd::FileDialog::new()
                 .set_title(tr().dlg_open_file)
@@ -1554,7 +1569,9 @@ fn onboarding(ui: &mut egui::Ui, st: &mut UiState) {
             st.pending_open = Some(p);
         }
         if ui
-            .add(egui::Button::new(egui::RichText::new(tr().open_folder).size(18.0)))
+            .add(egui::Button::new(
+                egui::RichText::new(tr().open_folder).size(18.0),
+            ))
             .clicked()
             && let Some(p) = rfd::FileDialog::new()
                 .set_title(tr().dlg_open_folder)
@@ -1617,12 +1634,19 @@ fn library_sections(ui: &mut egui::Ui, st: &mut UiState, lib: &Library, libctx: 
     ui.spacing_mut().scroll.fade.strength = 0.0;
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        if ui.button(tr().rescan).on_hover_text(tr().rescan_tip).clicked() {
+        if ui
+            .button(tr().rescan)
+            .on_hover_text(tr().rescan_tip)
+            .clicked()
+        {
             st.rescan = true;
         }
         // Set/change the library root lives here (rare action), not in the top bar —
         // mirrors the Android library's "Change library…".
-        if ui.button(tr().change_library).on_hover_text(tr().change_library_tip).clicked()
+        if ui
+            .button(tr().change_library)
+            .on_hover_text(tr().change_library_tip)
+            .clicked()
             && let Some(p) = rfd::FileDialog::new()
                 .set_title(tr().dlg_library)
                 .pick_folder()
@@ -1722,8 +1746,8 @@ fn library_sections(ui: &mut egui::Ui, st: &mut UiState, lib: &Library, libctx: 
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             for (v, state) in series.volumes.iter().zip(&states) {
-                                let is_current = libctx.current_key
-                                    == Some(v.path.to_string_lossy().as_ref());
+                                let is_current =
+                                    libctx.current_key == Some(v.path.to_string_lossy().as_ref());
                                 volume_cell(
                                     ui,
                                     st,

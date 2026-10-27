@@ -3331,7 +3331,11 @@ impl Reader {
             true
         } else {
             // Nowhere to go — let the reader know why seeking did nothing.
-            self.toast(if dir > 0 { tr().last_page } else { tr().first_page });
+            self.toast(if dir > 0 {
+                tr().last_page
+            } else {
+                tr().first_page
+            });
             false
         }
     }

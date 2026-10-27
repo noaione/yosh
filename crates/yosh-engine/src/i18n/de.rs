@@ -80,7 +80,9 @@ pub static DE: Strings = Strings {
     info_detection_not_run: "nicht ausgeführt",
     info_detection_source_gray: "Quelle in Graustufen",
     info_detection_traditional: |state| format!("Traditionell · {state}"),
-    info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · Sicherheit: {confidence} %"),
+    info_detection_ogsov: |state, confidence| {
+        format!("OGSOV · {state} · Sicherheit: {confidence} %")
+    },
     info_detection_unavailable: "OGSOV nicht verfügbar (Gewichte fehlen)",
     info_detection_transparent: "nicht ausgeführt (transparentes Bild)",
     color_state_color: "Farbe",
@@ -150,7 +152,10 @@ pub static DE: Strings = Strings {
                 ("S", "Einzelseite ↔ Doppelseite"),
                 ("D", "Leserichtung  R→L ↔ L→R"),
                 ("C", "fortlaufendes vertikales Scrollen"),
-                ("O", "Seitenpaarung verschieben (falsche Paarung korrigieren)"),
+                (
+                    "O",
+                    "Seitenpaarung verschieben (falsche Paarung korrigieren)",
+                ),
             ],
         },
         HelpSection {
@@ -158,8 +163,14 @@ pub static DE: Strings = Strings {
             rows: &[
                 ("+ / −", "zoomen (eine Vorgabetaste setzt den Zoom zurück)"),
                 ("ziehen", "verschieben"),
-                ("Strg+Mausrad", "am Mauszeiger zoomen (gleiche Stufen wie + / −)"),
-                ("Z", "kleine Seiten vergrößern (aus: Einpassen stoppt bei 100 % nativ)"),
+                (
+                    "Strg+Mausrad",
+                    "am Mauszeiger zoomen (gleiche Stufen wie + / −)",
+                ),
+                (
+                    "Z",
+                    "kleine Seiten vergrößern (aus: Einpassen stoppt bei 100 % nativ)",
+                ),
                 ("J", "zu Seite springen"),
                 ("R", "um 90° drehen (im Uhrzeigersinn)"),
                 ("I", "Bildinformationen anzeigen"),
@@ -167,7 +178,10 @@ pub static DE: Strings = Strings {
                 ("T", "Seitenübergang (Schieben + Überblenden)"),
                 ("V", "Bundschatten auf Doppelseiten ein-/ausschalten"),
                 ("⚙ Einstellungen", "Bundschatten auf Doppelseiten"),
-                ("G", "Animationsleiste ein-/ausblenden (animierte GIF / WebP)"),
+                (
+                    "G",
+                    "Animationsleiste ein-/ausblenden (animierte GIF / WebP)",
+                ),
                 ("F11", "Vollbild"),
                 ("Esc", "beenden"),
             ],
@@ -175,9 +189,18 @@ pub static DE: Strings = Strings {
         HelpSection {
             title: "Dateien",
             rows: &[
-                ("E", "im Explorer anzeigen (Ordner öffnen und Datei auswählen)"),
-                ("obere Leiste", "Ordner öffnen / Datei öffnen;  Bibliothek ↔ Reader;  ⚙ Einstellungen"),
-                ("Drag & Drop", "einen Ordner, ein Archiv oder ein Bild auf das Fenster ziehen"),
+                (
+                    "E",
+                    "im Explorer anzeigen (Ordner öffnen und Datei auswählen)",
+                ),
+                (
+                    "obere Leiste",
+                    "Ordner öffnen / Datei öffnen;  Bibliothek ↔ Reader;  ⚙ Einstellungen",
+                ),
+                (
+                    "Drag & Drop",
+                    "einen Ordner, ein Archiv oder ein Bild auf das Fenster ziehen",
+                ),
                 ("F1", "diese Hilfe ein/aus"),
             ],
         },
@@ -195,7 +218,10 @@ pub static DE: Strings = Strings {
     color_detection_ml: "ML",
     color_detection_weights_missing: "OGSOV-Gewichte sind in diesem Build nicht enthalten",
     perf_auto_now: |tier, battery| {
-        format!("Auto — derzeit {tier} ({})", if battery { "im Akkubetrieb" } else { "am Netz" })
+        format!(
+            "Auto — derzeit {tier} ({})",
+            if battery { "im Akkubetrieb" } else { "am Netz" }
+        )
     },
 
     // --- desktop: onboarding, library header, file dialogs ---
@@ -309,18 +335,51 @@ pub static DE: Strings = Strings {
         drag_zoom: "Ziehen — verschieben; Ctrl+Mausrad — am Cursor zoomen",
         drop_files: "Ordner, Archiv oder Bild ins Fenster ziehen",
         help_footer: "Tastenkürzel lassen sich unter ⌨ Tastenkürzel anpassen.",
-        categories: ["Navigation", "Ansicht", "Fenster und Info", "Bibliothek und Dateien", "Anwendung"],
+        categories: [
+            "Navigation",
+            "Ansicht",
+            "Fenster und Info",
+            "Bibliothek und Dateien",
+            "Anwendung",
+        ],
         actions: [
-            "Nächste Seite", "Vorherige Seite", "Links (leserichtungsabhängig)", "Rechts (leserichtungsabhängig)",
-            "Erste Seite", "Letzte Seite", "Ansicht wechseln", "Leserichtung umschalten", "Einzel-/Doppelseite umschalten",
-            "Scrollmodus umschalten", "Vergrößern", "Verkleinern", "Fenster einpassen", "Breite einpassen", "100 % (1:1)",
-            "Doppelseite L→R", "Doppelseite R→L", "Hilfe umschalten", "Vollbild umschalten", "Doppelseitenpaarung verschieben",
-            "Infoeinblendung umschalten", "Suchleiste umschalten", "Zu Seite springen", "Seitenübergang umschalten",
-            "Kleine Seiten strecken umschalten", "Bundschatten umschalten", "Animationsleiste umschalten", "Vorheriger Band",
-            "Nächster Band", "90° drehen", "Im Explorer anzeigen", "Beenden/Schließen",
+            "Nächste Seite",
+            "Vorherige Seite",
+            "Links (leserichtungsabhängig)",
+            "Rechts (leserichtungsabhängig)",
+            "Erste Seite",
+            "Letzte Seite",
+            "Ansicht wechseln",
+            "Leserichtung umschalten",
+            "Einzel-/Doppelseite umschalten",
+            "Scrollmodus umschalten",
+            "Vergrößern",
+            "Verkleinern",
+            "Fenster einpassen",
+            "Breite einpassen",
+            "100 % (1:1)",
+            "Doppelseite L→R",
+            "Doppelseite R→L",
+            "Hilfe umschalten",
+            "Vollbild umschalten",
+            "Doppelseitenpaarung verschieben",
+            "Infoeinblendung umschalten",
+            "Suchleiste umschalten",
+            "Zu Seite springen",
+            "Seitenübergang umschalten",
+            "Kleine Seiten strecken umschalten",
+            "Bundschatten umschalten",
+            "Animationsleiste umschalten",
+            "Vorheriger Band",
+            "Nächster Band",
+            "90° drehen",
+            "Im Explorer anzeigen",
+            "Beenden/Schließen",
         ],
         status_set: |action, binding| format!("{action} → {binding}"),
-        status_conflict: |action| format!("Konflikt mit „{action}“ — zuerst entfernen oder neu zuweisen"),
+        status_conflict: |action| {
+            format!("Konflikt mit „{action}“ — zuerst entfernen oder neu zuweisen")
+        },
         status_cleared: |action| format!("{action} gelöscht"),
         status_reset: |action| format!("{action} zurückgesetzt"),
         status_reset_all: "Alle auf Standard zurückgesetzt",

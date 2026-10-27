@@ -22,10 +22,11 @@ use notify::Watcher as _; // brings the `.watch()` method into scope
 use crate::config;
 use crate::gpu::Gpu;
 use crate::hotkeys::{self, Action, CaptureMode, HotkeyRequest, KeyBinding};
-use crate::library::{cover_bytes, Library, VolKind};
+use crate::library::{Library, VolKind, cover_bytes};
 use crate::ui::{self, UiState};
 use crate::update;
 use yosh_engine::gesture::{GestureCtx, GestureEvent, Phase, TouchGestures};
+use yosh_engine::i18n::{self, Lang, tr};
 use yosh_engine::layout::Layout;
 use yosh_engine::page::{FitMode, PagePipeline};
 use yosh_engine::pool::{DecodePool, Waker};
@@ -625,9 +626,15 @@ fn load_cjk_fonts(lang: Lang) -> Vec<CjkFont> {
         return vec![(b, lang.cjk_face(), JP_Y_OFFSET)];
     }
     let own: &[&str] = match lang {
-        Lang::ZhHans => &[r"C:\Windows\Fonts\msyh.ttc", "/Library/Fonts/Hiragino Sans GB.ttc"],
+        Lang::ZhHans => &[
+            r"C:\Windows\Fonts\msyh.ttc",
+            "/Library/Fonts/Hiragino Sans GB.ttc",
+        ],
         Lang::ZhHant => &[r"C:\Windows\Fonts\msjh.ttc"],
-        Lang::Ko => &[r"C:\Windows\Fonts\malgun.ttf", "/Library/Fonts/AppleSDGothicNeo.ttc"],
+        Lang::Ko => &[
+            r"C:\Windows\Fonts\malgun.ttf",
+            "/Library/Fonts/AppleSDGothicNeo.ttc",
+        ],
         // Latin / Cyrillic UIs: egui's own font draws the UI; CJK is file names only.
         _ => &[],
     };
@@ -1611,7 +1618,9 @@ impl State {
                 };
                 self.settings.direction_rtl = self.reader.direction == Direction::Rtl;
                 config::save(&self.settings);
-                self.toast((tr().toast_direction)(i18n::dir_short(self.reader.direction)));
+                self.toast((tr().toast_direction)(i18n::dir_short(
+                    self.reader.direction,
+                )));
             }
             Action::ToggleLayout => {
                 self.reader.layout = self.reader.layout.toggled();
@@ -3417,6 +3426,7 @@ impl State {
         });
         // Update the resize diagnostic before copying it into decoded/live rows.
         self.reader.update_resize_readout();
+        self.ui.resize_path = self.reader.resize_path_label();
         // Decoded/live rows belong to each page block. Refresh their values without
         // re-reading archive bytes every frame.
         if self.ui.info_open && !self.library_view {
@@ -3848,16 +3858,14 @@ impl State {
                             CaptureMode::Replace => self.settings.hotkeys.replace(action, binding),
                         }
                         config::save(&self.settings);
-                        self.ui.hotkeys_status = Some(
-                            (tr().hotkeys.status_set)(action.label(), &binding.label()),
-                        );
+                        self.ui.hotkeys_status =
+                            Some((tr().hotkeys.status_set)(action.label(), &binding.label()));
                     }
                 }
                 HotkeyRequest::Clear { action } => {
                     self.settings.hotkeys.clear(action);
                     config::save(&self.settings);
-                    self.ui.hotkeys_status =
-                        Some((tr().hotkeys.status_cleared)(action.label()));
+                    self.ui.hotkeys_status = Some((tr().hotkeys.status_cleared)(action.label()));
                 }
                 HotkeyRequest::ResetOne { action } => {
                     self.settings.hotkeys.reset_one(action);

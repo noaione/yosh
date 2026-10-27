@@ -80,7 +80,9 @@ pub static FR: Strings = Strings {
     info_detection_not_run: "non exécuté",
     info_detection_source_gray: "source en niveaux de gris",
     info_detection_traditional: |state| format!("Classique · {state}"),
-    info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · confiance : {confidence} %"),
+    info_detection_ogsov: |state, confidence| {
+        format!("OGSOV · {state} · confiance : {confidence} %")
+    },
     info_detection_unavailable: "OGSOV indisponible (poids manquants)",
     info_detection_transparent: "non exécuté (image transparente)",
     color_state_color: "couleur",
@@ -150,16 +152,28 @@ pub static FR: Strings = Strings {
                 ("S", "simple page ↔ double page"),
                 ("D", "sens de lecture  D→G ↔ G→D"),
                 ("C", "défilement vertical continu"),
-                ("O", "décaler l’appariement (corrige un mauvais appariement)"),
+                (
+                    "O",
+                    "décaler l’appariement (corrige un mauvais appariement)",
+                ),
             ],
         },
         HelpSection {
             title: "Affichage",
             rows: &[
-                ("+ / −", "zoom (une touche de préréglage réinitialise le zoom)"),
+                (
+                    "+ / −",
+                    "zoom (une touche de préréglage réinitialise le zoom)",
+                ),
                 ("glisser", "se déplacer"),
-                ("Ctrl+molette", "zoom sous le curseur (mêmes paliers que + / −)"),
-                ("Z", "agrandir les petites pages (non : l’ajustement s’arrête à 100 % natif)"),
+                (
+                    "Ctrl+molette",
+                    "zoom sous le curseur (mêmes paliers que + / −)",
+                ),
+                (
+                    "Z",
+                    "agrandir les petites pages (non : l’ajustement s’arrête à 100 % natif)",
+                ),
                 ("J", "aller à la page"),
                 ("R", "pivoter de 90° (sens horaire)"),
                 ("I", "afficher les infos de l’image"),
@@ -167,7 +181,10 @@ pub static FR: Strings = Strings {
                 ("T", "transition de page (glissement + fondu)"),
                 ("V", "activer/désactiver l’ombre de reliure en double page"),
                 ("⚙ Paramètres", "ombre de reliure en double page"),
-                ("G", "afficher/masquer le panneau d’animation (GIF / WebP animés)"),
+                (
+                    "G",
+                    "afficher/masquer le panneau d’animation (GIF / WebP animés)",
+                ),
                 ("F11", "plein écran"),
                 ("Échap", "quitter"),
             ],
@@ -175,9 +192,18 @@ pub static FR: Strings = Strings {
         HelpSection {
             title: "Fichiers",
             rows: &[
-                ("E", "afficher dans l’Explorateur (ouvre le dossier et sélectionne le fichier)"),
-                ("barre du haut", "Ouvrir un dossier / Ouvrir un fichier ;  Bibliothèque ↔ Lecteur ;  ⚙ Paramètres"),
-                ("glisser-déposer", "un dossier, une archive ou une image sur la fenêtre"),
+                (
+                    "E",
+                    "afficher dans l’Explorateur (ouvre le dossier et sélectionne le fichier)",
+                ),
+                (
+                    "barre du haut",
+                    "Ouvrir un dossier / Ouvrir un fichier ;  Bibliothèque ↔ Lecteur ;  ⚙ Paramètres",
+                ),
+                (
+                    "glisser-déposer",
+                    "un dossier, une archive ou une image sur la fenêtre",
+                ),
                 ("F1", "afficher/masquer cette aide"),
             ],
         },
@@ -195,7 +221,14 @@ pub static FR: Strings = Strings {
     color_detection_ml: "ML",
     color_detection_weights_missing: "Les poids OGSOV ne sont pas inclus dans cette version",
     perf_auto_now: |tier, battery| {
-        format!("Auto — actuellement {tier} ({})", if battery { "sur batterie" } else { "sur secteur" })
+        format!(
+            "Auto — actuellement {tier} ({})",
+            if battery {
+                "sur batterie"
+            } else {
+                "sur secteur"
+            }
+        )
     },
 
     // --- desktop: onboarding, library header, file dialogs ---
@@ -309,18 +342,51 @@ pub static FR: Strings = Strings {
         drag_zoom: "Glisser — déplacer; Ctrl+molette — zoomer sous le curseur",
         drop_files: "Glissez un dossier, une archive ou une image dans la fenêtre",
         help_footer: "Les raccourcis se personnalisent dans ⌨ Raccourcis clavier.",
-        categories: ["Navigation", "Affichage", "Fenêtres et infos", "Bibliothèque et fichiers", "Application"],
+        categories: [
+            "Navigation",
+            "Affichage",
+            "Fenêtres et infos",
+            "Bibliothèque et fichiers",
+            "Application",
+        ],
         actions: [
-            "Page suivante", "Page précédente", "Gauche (selon le sens de lecture)", "Droite (selon le sens de lecture)",
-            "Première page", "Dernière page", "Changer l’ajustement", "Changer le sens de lecture", "Alterner page simple/double",
-            "Alterner le défilement", "Zoom avant", "Zoom arrière", "Ajuster à la fenêtre", "Ajuster à la largeur", "100 % (1:1)",
-            "Double page G→D", "Double page D→G", "Afficher/masquer l’aide", "Plein écran", "Décaler l’association des pages",
-            "Afficher/masquer les infos", "Afficher/masquer la barre de défilement", "Aller à la page", "Transition de page",
-            "Étirer les petites pages", "Ombre de reliure", "Panneau d’animation", "Volume précédent", "Volume suivant",
-            "Pivoter de 90°", "Afficher dans l’Explorateur", "Quitter/Fermer",
+            "Page suivante",
+            "Page précédente",
+            "Gauche (selon le sens de lecture)",
+            "Droite (selon le sens de lecture)",
+            "Première page",
+            "Dernière page",
+            "Changer l’ajustement",
+            "Changer le sens de lecture",
+            "Alterner page simple/double",
+            "Alterner le défilement",
+            "Zoom avant",
+            "Zoom arrière",
+            "Ajuster à la fenêtre",
+            "Ajuster à la largeur",
+            "100 % (1:1)",
+            "Double page G→D",
+            "Double page D→G",
+            "Afficher/masquer l’aide",
+            "Plein écran",
+            "Décaler l’association des pages",
+            "Afficher/masquer les infos",
+            "Afficher/masquer la barre de défilement",
+            "Aller à la page",
+            "Transition de page",
+            "Étirer les petites pages",
+            "Ombre de reliure",
+            "Panneau d’animation",
+            "Volume précédent",
+            "Volume suivant",
+            "Pivoter de 90°",
+            "Afficher dans l’Explorateur",
+            "Quitter/Fermer",
         ],
         status_set: |action, binding| format!("{action} → {binding}"),
-        status_conflict: |action| format!("Conflit avec « {action} » — supprimez ou réaffectez-le d’abord"),
+        status_conflict: |action| {
+            format!("Conflit avec « {action} » — supprimez ou réaffectez-le d’abord")
+        },
         status_cleared: |action| format!("Affectations de {action} effacées"),
         status_reset: |action| format!("{action} réinitialisé"),
         status_reset_all: "Tous les raccourcis réinitialisés",

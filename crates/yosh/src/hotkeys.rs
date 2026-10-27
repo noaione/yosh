@@ -20,8 +20,8 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-use yosh_engine::i18n::tr;
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
+use yosh_engine::i18n::tr;
 
 /// A keyboard-driven reader action. Stable serialized IDs (snake_case) are the
 /// persisted tokens; display labels and categories drive the Hotkeys page and

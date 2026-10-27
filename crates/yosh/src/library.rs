@@ -6,8 +6,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use yosh_engine::page::PageTexture;
 use yosh_engine::i18n::tr;
+use yosh_engine::page::PageTexture;
 use yosh_engine::source::{FolderSource, PageSource, ZipSource, is_image_ext};
 
 #[derive(Clone, Copy, PartialEq)]

@@ -177,7 +177,10 @@ pub fn lang_pref_label(pref: Option<Lang>) -> String {
 /// The active UI language.
 pub fn lang() -> Lang {
     let v = CURRENT.load(Ordering::Relaxed);
-    Lang::ALL.into_iter().find(|l| *l as u8 == v).unwrap_or(Lang::En)
+    Lang::ALL
+        .into_iter()
+        .find(|l| *l as u8 == v)
+        .unwrap_or(Lang::En)
 }
 
 /// One section of the F1 key help: a heading and its `(keys, what it does)` rows.
@@ -591,10 +594,16 @@ mod tests {
             assert!((t.toast_partial_archive)(42).contains("42"), "{l:?}");
             assert!((t.couldnt_open)("x.png").contains("x.png"), "{l:?}");
             assert!((t.update_to)("9.9.9").contains("9.9.9"), "{l:?}");
-            assert!((t.perf_auto_now)(t.perf_high, true).contains(t.perf_high), "{l:?}");
+            assert!(
+                (t.perf_auto_now)(t.perf_high, true).contains(t.perf_high),
+                "{l:?}"
+            );
             // The zoom toast keeps its line break: the toast layout counts it.
             let z = (t.zoom_toast)(125.0, Some(t.fit_width));
-            assert!(z.contains("125.00") && z.contains('\n') && z.contains(t.fit_width), "{l:?}");
+            assert!(
+                z.contains("125.00") && z.contains('\n') && z.contains(t.fit_width),
+                "{l:?}"
+            );
             assert!(!(t.zoom_toast)(125.0, None).contains('\n'), "{l:?}");
             // Same help shape as English, so no section silently goes missing.
             assert_eq!(t.help_sections.len(), en::EN.help_sections.len(), "{l:?}");

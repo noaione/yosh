@@ -76,7 +76,9 @@ pub static EN: Strings = Strings {
     info_detection_not_run: "not run",
     info_detection_source_gray: "source grayscale",
     info_detection_traditional: |state| format!("Traditional · {state}"),
-    info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · confidence: {confidence}%"),
+    info_detection_ogsov: |state, confidence| {
+        format!("OGSOV · {state} · confidence: {confidence}%")
+    },
     info_detection_unavailable: "OGSOV unavailable (weights missing)",
     info_detection_transparent: "not run (transparent image)",
     color_state_color: "color",
@@ -172,7 +174,10 @@ pub static EN: Strings = Strings {
             title: "Files",
             rows: &[
                 ("E", "show in Explorer (open the folder & select the file)"),
-                ("top bar", "Open folder / Open file;  Library ↔ Reader;  ⚙ Settings"),
+                (
+                    "top bar",
+                    "Open folder / Open file;  Library ↔ Reader;  ⚙ Settings",
+                ),
                 ("drag & drop", "a folder, archive, or image onto the window"),
                 ("F1", "toggle this help"),
             ],
@@ -191,7 +196,10 @@ pub static EN: Strings = Strings {
     color_detection_ml: "ML",
     color_detection_weights_missing: "OGSOV weights not embedded in this build",
     perf_auto_now: |tier, battery| {
-        format!("Auto — currently {tier} ({})", if battery { "on battery" } else { "plugged in" })
+        format!(
+            "Auto — currently {tier} ({})",
+            if battery { "on battery" } else { "plugged in" }
+        )
     },
 
     // --- desktop: onboarding, library header, file dialogs ---
@@ -305,7 +313,13 @@ pub static EN: Strings = Strings {
         drag_zoom: "Drag — pan;   Ctrl+wheel — zoom at the cursor",
         drop_files: "Drag a folder, archive, or image onto the window",
         help_footer: "Shortcuts are customizable in ⌨ Hotkeys.",
-        categories: ["Navigate", "View", "Windows & info", "Library & files", "Application"],
+        categories: [
+            "Navigate",
+            "View",
+            "Windows & info",
+            "Library & files",
+            "Application",
+        ],
         actions: [
             "Next page",
             "Previous page",
