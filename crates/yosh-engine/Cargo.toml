@@ -41,7 +41,7 @@ image = { version = "0.25", default-features = false, features = [
     "tiff"
 ] }
 png = "0.18"
-jpeg-decoder = "0.3"
+zune-jpeg = "0.5.15"
 # Pure-Rust JPEG XL decoder (no C toolchain). default-features = false keeps
 # out the optional lcms2 (C) / image / rayon features — `moxcms` (pure Rust,
 # already present via `image`) handles CMYK JXL color management, and pages

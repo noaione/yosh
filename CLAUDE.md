@@ -27,7 +27,7 @@ cargo test  -p yosh spread                             # run a subset of tests b
 ```
 
 - `<path>` = a folder of images, or a `.cbz/.zip`, `.cbr/.rar`, or `.7z/.cb7` archive. No arg → library grid / keys overlay.
-- **The default build needs no C toolchain** — all decoders are pure-Rust (`png`, `jpeg-decoder`,
+- **The default build needs no C toolchain** — all decoders are pure-Rust (`png`, `zune-jpeg`,
   `image`, `qcms`; WebP via `wpd`), TLS for self-update is `ureq` over rustls+**ring** (not aws-lc).
   **Preserve this.** Two features are *opt-in* and each needs `nasm` **on x86-64 only** (aarch64/ARM
   assemble with `cc`):
@@ -55,7 +55,7 @@ cargo test  -p yosh spread                             # run a subset of tests b
   `read_page(index) -> bytes`, `len`, `name`, `modified`. Implementations: `FolderSource`, `ZipSource`
   (parallel reads), `RarSource` + `SevenzSource` (sequential formats: a reader thread decompresses into
   an in-memory map, then reads are served from there).
-- **Decode + HQ downscale** (`decode.rs` + `tone.rs` + `icc.rs`): magic-byte routing to png / jpeg-decoder
+- **Decode + HQ downscale** (`decode.rs` + `tone.rs` + `icc.rs`): magic-byte routing to png / zune-jpeg
   / image. This is subtle and deliberate:
   - **Grayscale path** downscales in **true linear light** (sRGB → 16-bit linear → Catmull-Rom resample →
     re-encode through the Dot Gain 20% curve in `tone.rs`). This is what kills halftone-screentone moiré;

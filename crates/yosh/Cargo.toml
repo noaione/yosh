@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 # The reusable decode/render core: the DecodePool, HQ decode path, page/texture/
 # cache layer, source backends, layout math, and the wgpu device context. The
-# page-decode crates (png/jpeg-decoder/image/jxl-oxide/psd/qcms/fast_image_resize/
+# page-decode crates (png/zune-jpeg/image/jxl-oxide/psd/qcms/fast_image_resize/
 # ico) and archive crates (zip/unrar/sevenz-rust2) live there, not here.
 yosh-engine = { path = "../yosh-engine" }
 # `serde` makes `KeyCode` serializable so the customizable hotkey map can be
