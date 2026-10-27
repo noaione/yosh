@@ -18,6 +18,12 @@ rar = ["dep:unrar"]
 # feature to this one. Enabling requires nasm + dav1d (see CI).
 avif = ["image/avif-native"]
 wpd-simd = ["wpd/asm"]
+# OGSOV/OGSOX ML colour-page detection. OFF by default: it pulls in the
+# `mangacolor` crate, whose build script converts the weight archive into ~6 MB
+# of embedded assets, and the thumbnail provider never classifies pages. The
+# desktop and Android shells enable this explicitly; `yosh-thumbnail` leaves it
+# off, so its build stays free of the models and their conversion.
+mangacolor = ["dep:mangacolor"]
 
 [dependencies]
 wgpu = "29.0.3"
@@ -51,7 +57,7 @@ jxl-oxide = { version = "0.12", default-features = false, features = ["moxcms"] 
 psd = "0.3"
 fast_image_resize = "6"
 qcms = "0.3"
-mangacolor = { path = "../mangacolor" }
+mangacolor = { path = "../mangacolor", optional = true }
 # ICO container parsing (multi-image .ico → layered pages) and re-encoding.
 ico = "0.6"
 wpd = { git = "https://github.com/halidecx/wpd", rev = "6fa9de20df3eacc5259751573c220ea6a7b03e5b", default-features = false, features = ["threads"] }

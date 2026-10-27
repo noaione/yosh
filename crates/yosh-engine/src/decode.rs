@@ -141,15 +141,31 @@ impl ColorDetectionOutcome {
     }
 }
 
-/// Whether this binary contains OGSOV weights required by [`ColorDetection::Ml`].
+/// Whether this binary was built with the ML models and carries OGSOV weights,
+/// which is what [`ColorDetection::Ml`] needs.
+#[cfg(feature = "mangacolor")]
 pub fn ml_color_detection_available() -> bool {
     mangacolor::ogsov_available()
 }
 
-/// Whether this binary contains OGSOX weights required by
-/// [`ColorDetection::Ogsox`].
+/// [`ColorDetection::Ml`] cannot run: this build has no `mangacolor` feature
+/// (the thumbnail provider is built that way).
+#[cfg(not(feature = "mangacolor"))]
+pub fn ml_color_detection_available() -> bool {
+    false
+}
+
+/// Whether this binary was built with the ML models and carries OGSOX weights,
+/// which is what [`ColorDetection::Ogsox`] needs.
+#[cfg(feature = "mangacolor")]
 pub fn ogsox_color_detection_available() -> bool {
     mangacolor::ogsox_available()
+}
+
+/// [`ColorDetection::Ogsox`] cannot run: this build has no `mangacolor` feature.
+#[cfg(not(feature = "mangacolor"))]
+pub fn ogsox_color_detection_available() -> bool {
+    false
 }
 
 /// GPU `max_texture_dimension_2d`, published by `gpu.rs` at startup. A decoded page
@@ -738,6 +754,54 @@ fn rgba_is_grayscale(rgba: &[u8], threshold: i32) -> bool {
     ratio <= threshold as f64 / 12.0
 }
 
+/// Run OGSOV on a decoded page, or report that no model can answer.
+///
+/// The models live behind the `mangacolor` feature: when it is off (as in the
+/// thumbnail provider) this is a compile-time `MlUnavailable`, so neither the
+/// crate nor its embedded weights are part of that build.
+#[cfg(feature = "mangacolor")]
+fn detect_ogsov_page(rgba: &[u8], w: u32, h: u32) -> ColorDetectionOutcome {
+    // OGSOV feature extraction removes its top 17 pixels. Tiny icons and
+    // malformed zero-sized images cannot be classified by that model.
+    if (w as usize).saturating_mul(h as usize) <= 17 {
+        return ColorDetectionOutcome::MlUnavailable;
+    }
+    match mangacolor::detect_ogsov(rgba, w as usize, h as usize, 4) {
+        Ok(result) => ColorDetectionOutcome::Ogsov {
+            is_color: result.is_color,
+            confidence: result.confidence as u8,
+        },
+        // Missing weights, or a frame the model refuses: stay conservative and
+        // keep the pixels in colour.
+        Err(_) => ColorDetectionOutcome::MlUnavailable,
+    }
+}
+
+/// See [`detect_ogsov_page`].
+#[cfg(not(feature = "mangacolor"))]
+fn detect_ogsov_page(_rgba: &[u8], _w: u32, _h: u32) -> ColorDetectionOutcome {
+    ColorDetectionOutcome::MlUnavailable
+}
+
+/// Run OGSOX on a decoded page, or report that no model can answer.
+#[cfg(feature = "mangacolor")]
+fn detect_ogsox_page(rgba: &[u8], w: u32, h: u32) -> ColorDetectionOutcome {
+    // OGSOX tiles the frame and has no minimum size.
+    match mangacolor::detect_ogsox(rgba, w as usize, h as usize, 4) {
+        Ok(result) => ColorDetectionOutcome::Ogsox {
+            is_color: result.is_color,
+            confidence: result.confidence as u8,
+        },
+        Err(_) => ColorDetectionOutcome::MlUnavailable,
+    }
+}
+
+/// See [`detect_ogsox_page`].
+#[cfg(not(feature = "mangacolor"))]
+fn detect_ogsox_page(_rgba: &[u8], _w: u32, _h: u32) -> ColorDetectionOutcome {
+    ColorDetectionOutcome::MlUnavailable
+}
+
 /// Classify an opaque RGBA page. `true` means it is safe to collapse to one
 /// luminance channel. OGSOV accepts RGB, so alpha is stripped only for ML mode.
 fn detect_color(
@@ -759,32 +823,8 @@ fn detect_color(
         ColorDetection::Traditional => ColorDetectionOutcome::Traditional {
             is_color: !rgba_is_grayscale(rgba, GRAYSCALE_THRESHOLD),
         },
-        ColorDetection::Ml => {
-            // OGSOV feature extraction removes its top 17 pixels. Tiny icons and
-            // malformed zero-sized images cannot be classified by that model.
-            if (w as usize).saturating_mul(h as usize) <= 17 {
-                return ColorDetectionOutcome::MlUnavailable;
-            }
-            match mangacolor::detect_ogsov(rgba, w as usize, h as usize, 4) {
-                Ok(result) => ColorDetectionOutcome::Ogsov {
-                    is_color: result.is_color,
-                    confidence: result.confidence as u8,
-                },
-                // Missing weights, or a frame the model refuses: stay
-                // conservative and keep the pixels in colour.
-                Err(_) => ColorDetectionOutcome::MlUnavailable,
-            }
-        }
-        ColorDetection::Ogsox => {
-            // OGSOX tiles the frame and has no minimum size.
-            match mangacolor::detect_ogsox(rgba, w as usize, h as usize, 4) {
-                Ok(result) => ColorDetectionOutcome::Ogsox {
-                    is_color: result.is_color,
-                    confidence: result.confidence as u8,
-                },
-                Err(_) => ColorDetectionOutcome::MlUnavailable,
-            }
-        }
+        ColorDetection::Ml => detect_ogsov_page(rgba, w, h),
+        ColorDetection::Ogsox => detect_ogsox_page(rgba, w, h),
     }
 }
 

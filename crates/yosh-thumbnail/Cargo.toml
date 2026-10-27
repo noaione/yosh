@@ -46,6 +46,8 @@ zip = "9"
 # The decode core: `cover::cover_bytes` extracts the selected cover entry, and
 # `decode`/`meta` decode + probe it without a GPU. (wgpu is a transitive dep but
 # is never used by the provider.)
+# Built without the engine's `mangacolor` feature: the provider only decodes a
+# cover, so it never classifies a page and never embeds the ML model assets.
 yosh-engine = { path = "../yosh-engine" }
 # The CPU `Resizer` the engine's `decode_page` takes. The engine depends on it
 # but does not re-export it, so the DLL re-uses the same crate version.

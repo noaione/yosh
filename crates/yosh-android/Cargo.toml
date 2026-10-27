@@ -23,7 +23,7 @@ rar = ["yosh-engine/rar"]
 [target.'cfg(target_os = "android")'.dependencies]
 # RAR is dropped on Android (its bundled C++ won't cross-compile); folder / CBZ /
 # 7z page sources remain.
-yosh-engine = { path = "../yosh-engine", default-features = false }
+yosh-engine = { path = "../yosh-engine", default-features = false, features = ["mangacolor"] }
 wgpu = "29.0.3"
 winit = { version = "0.30.13", features = ["android-native-activity"] }
 android_logger = "0.14"

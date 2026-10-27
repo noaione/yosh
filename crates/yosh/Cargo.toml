@@ -8,7 +8,7 @@ edition = "2024"
 # cache layer, source backends, layout math, and the wgpu device context. The
 # page-decode crates (png/zune-jpeg/image/jxl-oxide/psd/qcms/fast_image_resize/
 # ico) and archive crates (zip/unrar/sevenz-rust2) live there, not here.
-yosh-engine = { path = "../yosh-engine" }
+yosh-engine = { path = "../yosh-engine", features = ["mangacolor"] }
 # `serde` makes `KeyCode` serializable so the customizable hotkey map can be
 # persisted in state.json (physical codes survive across keyboard layouts).
 winit = { version = "0.30.13", features = ["serde"] }
