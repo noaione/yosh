@@ -129,13 +129,15 @@ jobs:
       - name: Build
         shell: pwsh
         env:
-          RUSTFLAGS: -C target-feature=+crt-static
+          # +avx2 enables mangacolor's AVX2 kernels and /arch:AVX2 for the rest
+          # of the binary, so this build requires an AVX2 CPU (2013+).
+          RUSTFLAGS: -C target-feature=+crt-static,+avx2
         run: cargo build --release -p yosh --features avif,wpd-simd
 
       - name: Build Windows thumbnail provider
         shell: pwsh
         env:
-          RUSTFLAGS: -C target-feature=+crt-static
+          RUSTFLAGS: -C target-feature=+crt-static,+avx2
         run: cargo build --release -p yosh-thumbnail --features avif,wpd-simd
 
       - name: Package executable and portable zip

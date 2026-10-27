@@ -1,6 +1,11 @@
 /target
 *.jks
-ogso[xv]*
+# Model weights are fetched/generated separately, never committed. Spelled out
+# rather than `ogso[xv]*`, which also matched `crates/mangacolor/src/ogsov.rs`,
+# `ogsox.rs` and their module directories and silently kept them out of git.
+ogsov_weights.npz
+ogsox_classifier_optimized.onnx
+ogsox_lookup_table.npz
 __pycache__
 
 *.npz

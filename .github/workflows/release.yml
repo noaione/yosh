@@ -17,7 +17,11 @@ jobs:
           - os: windows-latest
             bin: target/release/yosh.exe
             asset: yosh-windows-x64.exe
-            rustflags: "-C target-feature=+crt-static"
+            # +avx2 compiles mangacolor's AVX2 kernels (SIMD page detection) and
+            # sets /arch:AVX2 for the rest of the binary, so the shipping
+            # Windows build requires a CPU with AVX2 (2013+).  +crt-static keeps
+            # the CRT linked in, as before.
+            rustflags: "-C target-feature=+crt-static,+avx2"
           - os: ubuntu-latest
             bin: target/release/yosh
             asset: yosh-linux-x64

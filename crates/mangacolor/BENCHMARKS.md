@@ -82,11 +82,13 @@ OGSOX on the same canvases is 1.6–2.1 ms (512² tiling, five attention heads).
 
 The per-pixel SIMD kernels are selected at compile time, as in
 `vs-mangacolor`: on aarch64 NEON is part of the baseline, while on x86-64 the
-AVX2/AVX-512 kernels exist only when the build enables those target features
-(`RUSTFLAGS="-C target-feature=+avx2"`).  yosh's release CI does not enable
-them (a single binary must run on pre-AVX2 CPUs), so x86 builds take the scalar
-kernels — still faster than the old crate because of the algorithmic changes,
-but runtime CPU dispatch would be the way to get the vector paths there too.
+AVX2/AVX-512 kernels exist only when the build enables those target features.
+The Windows x64 release and artifact builds pass `-C target-feature=+avx2` (with
+`+crt-static`), so those binaries use the AVX2 kernels and require an AVX2 CPU
+(2013+).  AVX-512 is deliberately not enabled: consumer CPUs since Alder Lake
+ship without it.  The Linux x64 build keeps the baseline and therefore takes the
+scalar kernels; the same flag there enables them.  Runtime CPU dispatch would
+give x86 the vector paths without raising the baseline.
 
 
 ## Tests
