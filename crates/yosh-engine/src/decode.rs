@@ -26,6 +26,7 @@ use wpd::{
 
 use crate::icc;
 use crate::tone;
+use crate::ycck::to_rgba as ycck_to_rgba;
 
 const PNG_SIG: [u8; 4] = [0x89, 0x50, 0x4E, 0x47];
 
@@ -283,35 +284,6 @@ fn jpeg_uses_adobe_inverted_cmyk(bytes: &[u8]) -> bool {
         }
     }
     false
-}
-
-/// BT.601 full-range YCbCr -> RGB, the matrix every JPEG decoder uses.
-fn ycbcr_to_rgb(y: u8, cb: u8, cr: u8) -> (u8, u8, u8) {
-    let y = y as f32;
-    let cb = cb as f32 - 128.0;
-    let cr = cr as f32 - 128.0;
-    let clamp = |value: f32| value.round().clamp(0.0, 255.0) as u8;
-    (
-        clamp(y + 1.402 * cr),
-        clamp(y - 0.344_136 * cb - 0.714_136 * cr),
-        clamp(y + 1.772 * cb),
-    )
-}
-
-/// Convert Adobe YCCK samples (`Y, Cb, Cr, K` with K inverted) to opaque RGBA8.
-///
-/// Adobe stores the display colour's YCbCr plus an *inverted* K (255 = no black
-/// ink), unlike its conventional CMYK siblings, so the display colour is
-/// `YCbCr -> RGB` scaled by `K / 255`.
-fn ycck_to_rgba(ycck: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(ycck.len());
-    for px in ycck.as_chunks::<4>().0 {
-        let (r, g, b) = ycbcr_to_rgb(px[0], px[1], px[2]);
-        let coverage = px[3] as u32;
-        let scale = |value: u8| ((value as u32 * coverage + 127) / 255) as u8;
-        out.extend_from_slice(&[scale(r), scale(g), scale(b), 255]);
-    }
-    out
 }
 
 /// Generic fallback for CMYK JPEGs without a usable embedded profile: convert

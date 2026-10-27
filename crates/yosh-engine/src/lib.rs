@@ -27,3 +27,6 @@ pub mod source;
 pub mod texpool;
 pub mod thumbcache;
 pub mod tone;
+// Adobe YCCK -> RGBA8 with NEON/AVX2 kernels; an implementation detail of
+// `decode` (kept out of that file purely for size).
+mod ycck;
