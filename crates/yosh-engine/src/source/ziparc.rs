@@ -166,37 +166,30 @@ impl ZipSource {
     /// A dir entry's name ends in `/`, so `is_image_name` rejects it; the explicit `/`
     /// guard is belt-and-suspenders for an oddly-named dir.
     ///
-    /// For the *display* name we want the real characters, not the transliteration. That
-    /// same keyed-by-raw-bytes map gives us an exact, allocation-free test for which
-    /// names need help: `index_for_name(n)` hashes `n`'s UTF-8 bytes against the raw
-    /// keys, so a name that maps back to its own entry is already byte-exact (ASCII, or
-    /// a properly UTF-8-flagged name) and is kept as-is. Only a name that *fails* that
-    /// round-trip is a CP437 transliteration, and only for those do we re-read the raw
-    /// header bytes and decode them ourselves — so Shift-JIS/GBK pages display and sort
-    /// correctly. Both `file_names()` and the round-trip test read from the already-parsed
-    /// in-memory central directory, so ASCII and UTF-8-flagged archives (the overwhelming
-    /// majority, including Japanese ones written by modern zippers) pay nothing at all;
-    /// only a genuinely legacy-encoded archive pays a local-header seek per entry
-    /// (~1.5 ms for 500 entries).
+    /// For the *display* name we want the real characters, not the transliteration.
+    /// `zip` cannot tell us which one it gave us — and `index_for_name` cannot either,
+    /// because it falls back to matching the decoded name (so a transliteration resolves
+    /// to its own entry just fine). The raw central-directory bytes can: a decoded name
+    /// that re-encodes exactly to those bytes was already exact (ASCII, or a properly
+    /// UTF-8-flagged name) and is kept as-is; any other name is a transliteration (or
+    /// undecodable), and only those are decoded from their real bytes — so Shift-JIS/GBK
+    /// pages display and sort correctly, and unflagged UTF-8 survives. Both lists read
+    /// from the already-parsed in-memory central directory, so ASCII and UTF-8-flagged
+    /// archives (the overwhelming majority, including Japanese ones written by modern
+    /// zippers) cost nothing extra and no per-entry seek is needed.
     fn list_central(zip: &mut ZipArchive<Reader>) -> (Vec<String>, Vec<usize>) {
+        // Raw names and zip's decoding, positionally aligned with `by_index`.
+        let raws: Vec<Vec<u8>> = zip.file_names_raw().map(|raw| raw.to_vec()).collect();
         // Keep one slot per archive entry even when zip cannot decode a name; the
         // positions here are the indices used by `by_index` and `index_for_name`.
         let decoded: Vec<Option<String>> = zip
             .file_names()
             .map(|name| name.map(|name| name.into_owned()).ok())
             .collect();
-        // Compare against `Some(i)`, not just `is_some()`: a pathological archive holding
-        // both the raw and the transliterated spelling of one name would otherwise let an
-        // entry validate against its neighbour.
-        let exact: Vec<bool> = decoded
-            .iter()
-            .enumerate()
-            .map(|(i, n)| n.as_ref().is_some_and(|n| zip.index_for_name(n) == Some(i)))
-            .collect();
         // Image filtering can run on the transliterated name: CP437 maps ASCII to itself,
         // and no legacy trail byte is `.` (Shift-JIS trail bytes start at 0x40), so the
-        // extension survives transliteration intact. Filtering first also keeps the raw
-        // re-read below down to the pages we actually intend to show. Names zip couldn't
+        // extension survives transliteration intact. Filtering first also keeps the
+        // re-decode below down to the pages we actually intend to show. Names zip couldn't
         // decode are kept as candidates until their raw bytes have been decoded below.
         let keep: Vec<usize> = (0..decoded.len())
             .filter(|&i| {
@@ -206,18 +199,25 @@ impl ZipSource {
             })
             .collect();
 
-        // Only names that failed the round-trip need their raw bytes re-read. If a raw
-        // read fails, keep zip's decoded name when available; one bad entry shouldn't
-        // cost us the rest of the archive.
-        let (idxs, raws): (Vec<usize>, Vec<Vec<u8>>) = keep
-            .iter()
-            .copied()
-            .filter(|&i| !exact[i])
-            .filter_map(|i| zip.by_index_raw(i).ok().map(|e| (i, e.name_raw().to_vec())))
-            .unzip();
-        let enc = detect_legacy_encoding(&raws);
+        // A decoded name is exact only when it re-encodes to the raw bytes. Anything
+        // else is a transliteration (or zip could not decode it at all) and is decoded
+        // from its real bytes; `decode_entry_name` prefers valid UTF-8, so unflagged
+        // UTF-8 names come out intact.
         let mut legacy: Vec<Option<String>> = vec![None; decoded.len()];
-        for (i, raw) in idxs.into_iter().zip(&raws) {
+        let mut coded: Vec<Vec<u8>> = Vec::new();
+        let mut coded_indices: Vec<usize> = Vec::new();
+        for &i in &keep {
+            let raw = &raws[i];
+            let exact = decoded[i]
+                .as_deref()
+                .is_some_and(|name| name.as_bytes() == raw.as_slice());
+            if !exact {
+                coded_indices.push(i);
+                coded.push(raw.clone());
+            }
+        }
+        let enc = detect_legacy_encoding(&coded);
+        for (i, raw) in coded_indices.into_iter().zip(&coded) {
             legacy[i] = Some(decode_entry_name(raw, enc));
         }
 
