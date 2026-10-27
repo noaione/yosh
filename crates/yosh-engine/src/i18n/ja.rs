@@ -81,7 +81,8 @@ pub static JA: Strings = Strings {
     info_detection_source_gray: "元画像はグレースケール",
     info_detection_traditional: |state| format!("従来方式 · {state}"),
     info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · 信頼度: {confidence}%"),
-    info_detection_unavailable: "OGSOV を利用できません (重みデータなし)",
+    info_detection_ogsox: |state, confidence| format!("OGSOX · {state} · 信頼度: {confidence}%"),
+    info_detection_unavailable: "ML を利用できません (重みデータなし)",
     info_detection_transparent: "未実行 (透明画像)",
     color_state_color: "カラー",
     color_state_grayscale: "グレースケール",
@@ -202,7 +203,8 @@ pub static JA: Strings = Strings {
     color_page_detection: "カラー画像の判定",
     color_detection_traditional: "従来方式",
     color_detection_ml: "ML",
-    color_detection_weights_missing: "このビルドには OGSOV の重みデータが含まれていません",
+    color_detection_ogsox: "OGSOX",
+    color_detection_weights_missing: "このビルドには ML の重みデータが含まれていません",
     perf_auto_now: |tier, battery| {
         format!(
             "自動 — 現在: {tier} ({})",

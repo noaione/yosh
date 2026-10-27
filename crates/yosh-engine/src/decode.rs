@@ -42,9 +42,14 @@ pub enum ColorDetection {
     /// MangaJaNai-compatible channel-difference threshold.
     #[default]
     Traditional,
-    /// OGSOV ML ensemble. If this build has no embedded weights, conservatively
-    /// retain color rather than silently falling back to another strategy.
+    /// OGSOV ML ensemble (colourfulness histogram + five MLPs). If this build
+    /// has no embedded weights, conservatively retain color rather than
+    /// silently falling back to another strategy.
     Ml,
+    /// OGSOX ML model (512² tiling + five attention heads). Better than OGSOV
+    /// when colour is sparse; same conservative fallback when weights are
+    /// missing.
+    Ogsox,
 }
 
 /// Decode behavior shared by direct callers and decode-pool workers.
@@ -59,9 +64,19 @@ pub enum ColorDetectionOutcome {
     NotRun,
     SourceGray,
     Off,
-    Traditional { is_color: bool },
-    Ogsov { is_color: bool, confidence: u8 },
-    OgsovUnavailable,
+    Traditional {
+        is_color: bool,
+    },
+    Ogsov {
+        is_color: bool,
+        confidence: u8,
+    },
+    Ogsox {
+        is_color: bool,
+        confidence: u8,
+    },
+    /// No model ran because this build carries no ML weights.
+    MlUnavailable,
     Transparent,
 }
 
@@ -69,7 +84,9 @@ impl ColorDetectionOutcome {
     fn is_color(self) -> Option<bool> {
         match self {
             Self::SourceGray => Some(false),
-            Self::Traditional { is_color } | Self::Ogsov { is_color, .. } => Some(is_color),
+            Self::Traditional { is_color }
+            | Self::Ogsov { is_color, .. }
+            | Self::Ogsox { is_color, .. } => Some(is_color),
             _ => None,
         }
     }
@@ -86,7 +103,11 @@ impl ColorDetectionOutcome {
                 is_color,
                 confidence,
             } => format!("OGSOV · is_color: {is_color} · confidence: {confidence}%"),
-            Self::OgsovUnavailable => "OGSOV unavailable (weights missing)".to_string(),
+            Self::Ogsox {
+                is_color,
+                confidence,
+            } => format!("OGSOX · is_color: {is_color} · confidence: {confidence}%"),
+            Self::MlUnavailable => "ML unavailable (weights missing)".to_string(),
             Self::Transparent => "not run (transparent image)".to_string(),
         }
     }
@@ -110,7 +131,11 @@ impl ColorDetectionOutcome {
                 is_color,
                 confidence,
             } => (t.info_detection_ogsov)(state(is_color), confidence),
-            Self::OgsovUnavailable => t.info_detection_unavailable.to_owned(),
+            Self::Ogsox {
+                is_color,
+                confidence,
+            } => (t.info_detection_ogsox)(state(is_color), confidence),
+            Self::MlUnavailable => t.info_detection_unavailable.to_owned(),
             Self::Transparent => t.info_detection_transparent.to_owned(),
         }
     }
@@ -118,7 +143,13 @@ impl ColorDetectionOutcome {
 
 /// Whether this binary contains OGSOV weights required by [`ColorDetection::Ml`].
 pub fn ml_color_detection_available() -> bool {
-    ogsov::OGSOV_EMBEDDED
+    mangacolor::ogsov_available()
+}
+
+/// Whether this binary contains OGSOX weights required by
+/// [`ColorDetection::Ogsox`].
+pub fn ogsox_color_detection_available() -> bool {
+    mangacolor::ogsox_available()
 }
 
 /// GPU `max_texture_dimension_2d`, published by `gpu.rs` at startup. A decoded page
@@ -698,15 +729,26 @@ fn detect_color(
             // OGSOV feature extraction removes its top 17 pixels. Tiny icons and
             // malformed zero-sized images cannot be classified by that model.
             if (w as usize).saturating_mul(h as usize) <= 17 {
-                return ColorDetectionOutcome::OgsovUnavailable;
+                return ColorDetectionOutcome::MlUnavailable;
             }
-            let Some(model) = ogsov::embedded_model() else {
-                return ColorDetectionOutcome::OgsovUnavailable;
-            };
-            let result = model.detect_rgba(rgba, w as usize, h as usize);
-            ColorDetectionOutcome::Ogsov {
-                is_color: result.is_color,
-                confidence: result.confidence,
+            match mangacolor::detect_ogsov(rgba, w as usize, h as usize, 4) {
+                Ok(result) => ColorDetectionOutcome::Ogsov {
+                    is_color: result.is_color,
+                    confidence: result.confidence as u8,
+                },
+                // Missing weights, or a frame the model refuses: stay
+                // conservative and keep the pixels in colour.
+                Err(_) => ColorDetectionOutcome::MlUnavailable,
+            }
+        }
+        ColorDetection::Ogsox => {
+            // OGSOX tiles the frame and has no minimum size.
+            match mangacolor::detect_ogsox(rgba, w as usize, h as usize, 4) {
+                Ok(result) => ColorDetectionOutcome::Ogsox {
+                    is_color: result.is_color,
+                    confidence: result.confidence as u8,
+                },
+                Err(_) => ColorDetectionOutcome::MlUnavailable,
             }
         }
     }
@@ -1305,7 +1347,7 @@ mod tests {
         .unwrap();
         assert!(!img.gray);
         assert_eq!(img.path, ResizePath::Color);
-        assert_eq!(img.color_detection, ColorDetectionOutcome::OgsovUnavailable);
+        assert_eq!(img.color_detection, ColorDetectionOutcome::MlUnavailable);
     }
 
     #[test]
@@ -1364,6 +1406,62 @@ mod tests {
                 confidence: 100,
             }
         );
+    }
+
+    #[test]
+    fn ogsox_detection_routes_exact_rgb_gray_when_model_available() {
+        if !ogsox_color_detection_available() {
+            return;
+        }
+        let bytes = encode_rgb_png(32, 32, [120, 120, 120]);
+        let mut resizer = Resizer::new();
+        let img = decode_and_downscale_with_options(
+            &bytes,
+            16,
+            DecodeOptions {
+                color_detection: ColorDetection::Ogsox,
+            },
+            &mut resizer,
+        )
+        .unwrap();
+        assert!(img.gray);
+        assert_eq!(img.path, ResizePath::GrayFromColor);
+        assert_eq!(
+            img.color_detection,
+            ColorDetectionOutcome::Ogsox {
+                is_color: false,
+                confidence: 100,
+            }
+        );
+    }
+
+    #[test]
+    fn ogsox_detection_classifies_a_colour_page_when_model_available() {
+        if !ogsox_color_detection_available() {
+            return;
+        }
+        let bytes = encode_rgb_png(32, 32, [255, 0, 0]);
+        let mut resizer = Resizer::new();
+        let img = decode_and_downscale_with_options(
+            &bytes,
+            16,
+            DecodeOptions {
+                color_detection: ColorDetection::Ogsox,
+            },
+            &mut resizer,
+        )
+        .unwrap();
+        assert!(!img.gray);
+        assert_eq!(img.path, ResizePath::Color);
+        let ColorDetectionOutcome::Ogsox {
+            is_color,
+            confidence,
+        } = img.color_detection
+        else {
+            panic!("expected an OGSOX verdict, got {:?}", img.color_detection);
+        };
+        assert!(is_color, "solid red is a colour page");
+        assert!(confidence >= 99, "confidence {confidence}");
     }
 
     #[test]

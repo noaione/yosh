@@ -81,7 +81,8 @@ pub static ZH_HANT: Strings = Strings {
     info_detection_source_gray: "來源為灰階",
     info_detection_traditional: |state| format!("傳統 · {state}"),
     info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · 信心度: {confidence}%"),
-    info_detection_unavailable: "OGSOV 無法使用（缺少權重）",
+    info_detection_ogsox: |state, confidence| format!("OGSOX · {state} · 信心度: {confidence}%"),
+    info_detection_unavailable: "ML 無法使用（缺少權重）",
     info_detection_transparent: "未執行（透明圖片）",
     color_state_color: "彩色",
     color_state_grayscale: "灰階",
@@ -193,7 +194,8 @@ pub static ZH_HANT: Strings = Strings {
     color_page_detection: "彩色頁面偵測",
     color_detection_traditional: "傳統",
     color_detection_ml: "ML",
-    color_detection_weights_missing: "此版本未嵌入 OGSOV 權重",
+    color_detection_ogsox: "OGSOX",
+    color_detection_weights_missing: "此版本未嵌入 ML 權重",
     perf_auto_now: |tier, battery| {
         format!(
             "自動 — 目前為{tier}（{}）",

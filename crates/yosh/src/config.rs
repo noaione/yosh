@@ -88,6 +88,7 @@ pub enum ColorDetectionPref {
     #[default]
     Traditional,
     Ml,
+    Ogsox,
 }
 
 impl ColorDetectionPref {
@@ -98,6 +99,7 @@ impl ColorDetectionPref {
                 Self::Off => ColorDetection::Off,
                 Self::Traditional => ColorDetection::Traditional,
                 Self::Ml => ColorDetection::Ml,
+                Self::Ogsox => ColorDetection::Ogsox,
             },
         }
     }

@@ -37,6 +37,40 @@ jobs:
         with:
           prefix-key: "ci-test"
 
+      # Embed the ML models when the weights zip is available, so the model
+      # tests run here instead of skipping. Forks have no secret, so the step
+      # warns and continues and those tests skip.
+      - name: Fetch model weights
+        env:
+          MANGACOLOR_WEIGHTS_URL: ${{ secrets.MANGACOLOR_WEIGHTS_URL || secrets.OGSOV_WEIGHTS_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$MANGACOLOR_WEIGHTS_URL" ]; then
+            echo "::warning::no weights URL is set; building without the embedded ML models"
+            exit 0
+          fi
+          archive="$RUNNER_TEMP/mangacolor-weights.zip"
+          curl --fail --location --silent --show-error "$MANGACOLOR_WEIGHTS_URL" --output "$archive"
+          python3 - "$archive" <<'PY'
+          import pathlib, sys, zipfile
+
+          wanted = {
+              "ogsov.npz": "ogsov_weights.npz",
+              "ogsox_classifier_optimized.onnx": "ogsox_classifier_optimized.onnx",
+              "ogsox_lookup_table.npz": "ogsox_lookup_table.npz",
+          }
+          archive = pathlib.Path(sys.argv[1])
+          target = pathlib.Path("crates/mangacolor")
+          target.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(archive) as bundle:
+              entries = {pathlib.Path(name).name: name for name in bundle.namelist()}
+              for source, renamed in wanted.items():
+                  if source not in entries:
+                      sys.exit(f"{source} is not in the weights archive")
+                  (target / renamed).write_bytes(bundle.read(entries[source]))
+                  print(f"wrote {target / renamed}")
+          PY
+
       # Workspace is clippy-clean; keep it that way.
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings

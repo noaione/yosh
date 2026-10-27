@@ -2315,6 +2315,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mangacolor"
+version = "0.2.0"
+dependencies = [
+ "criterion",
+ "image",
+ "npyz",
+ "zip",
+]
+
+[[package]]
 name = "maybe-rayon"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2930,16 +2940,6 @@ dependencies = [
  "objc2 0.5.2",
  "objc2-core-location",
  "objc2-foundation 0.2.2",
-]
-
-[[package]]
-name = "ogsov"
-version = "0.1.0"
-dependencies = [
- "criterion",
- "image",
- "npyz",
- "zip",
 ]
 
 [[package]]
@@ -5647,8 +5647,8 @@ dependencies = [
  "image",
  "image-webp",
  "jxl-oxide",
+ "mangacolor",
  "natord",
- "ogsov",
  "png",
  "pollster",
  "psd",

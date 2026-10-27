@@ -1,3 +1,15 @@
+//! OGSOV and OGSOX detection benchmarks.
+//!
+//! Latency covers the whole interleaved-input entry point (`detect_ogsov` /
+//! `detect_ogsox`): the one-pass de-interleave into reusable planes plus the
+//! model's own kernels.  Image decode and synthetic-canvas creation happen
+//! before the timed loops.
+//!
+//! Weights must be embedded at build time (see the crate's build.rs).  Sizes
+//! are read from `MANGACOLOR_BENCH_SIZES` (default `256,1024`) and real images
+//! from `MANGACOLOR_BENCH_IMAGES` (a path list); without images only the
+//! synthetic canvases run.
+
 use std::collections::HashSet;
 use std::hint::black_box;
 use std::path::{Path, PathBuf};
@@ -5,7 +17,6 @@ use std::time::Duration;
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use image::GenericImageView;
-use ogsov::detect::Ogsov;
 
 struct Canvas {
     name: String,
@@ -23,24 +34,24 @@ fn main_config() -> Criterion {
         .measurement_time(Duration::from_secs(5))
 }
 
-fn model() -> &'static Ogsov {
-    ogsov::embedded_model().unwrap_or_else(|| {
-        panic!(
-            "OGSOV weights missing; set OGSOV_WEIGHTS_PATH or add crates/ogsov/ogsov_weights.npz"
-        )
-    })
+fn require_weights() {
+    assert!(
+        mangacolor::ogsov_available() && mangacolor::ogsox_available(),
+        "mangacolor weights are not embedded; place ogsov_weights.npz and \
+         ogsox_classifier_optimized.onnx in the crate or workspace root and rebuild"
+    );
 }
 
 fn configured_sizes() -> Vec<usize> {
-    let raw = std::env::var("OGSOV_BENCH_SIZES").unwrap_or_else(|_| "256,1024".to_owned());
+    let raw = std::env::var("MANGACOLOR_BENCH_SIZES").unwrap_or_else(|_| "256,1024".to_owned());
     let sizes: Vec<_> = raw
         .split(',')
         .filter_map(|s| s.trim().parse::<usize>().ok())
-        .filter(|&s| s > 4)
+        .filter(|&s| s > 17)
         .collect();
     assert!(
         !sizes.is_empty(),
-        "OGSOV_BENCH_SIZES must contain comma-separated positive integers"
+        "MANGACOLOR_BENCH_SIZES must contain comma-separated integers above 17"
     );
     sizes
 }
@@ -140,9 +151,11 @@ fn synthetic_canvases(size: usize) -> Vec<Canvas> {
     ]
 }
 
-fn bench_synthetic(c: &mut Criterion) {
-    let model = model();
-    let mut group = c.benchmark_group("synthetic/detect");
+fn bench_model<F>(c: &mut Criterion, model: &str, detect: F)
+where
+    F: Fn(&[u8], usize, usize) -> f64,
+{
+    let mut group = c.benchmark_group(format!("synthetic/{model}"));
     for size in configured_sizes() {
         for canvas in synthetic_canvases(size) {
             group.throughput(Throughput::Elements((canvas.width * canvas.height) as u64));
@@ -151,17 +164,29 @@ fn bench_synthetic(c: &mut Criterion) {
                 format!("{}x{}", canvas.width, canvas.height),
             );
             group.bench_with_input(id, &canvas, |b, canvas| {
-                b.iter(|| {
-                    black_box(model.detect(black_box(&canvas.rgb), canvas.width, canvas.height))
-                });
+                b.iter(|| black_box(detect(black_box(&canvas.rgb), canvas.width, canvas.height)));
             });
         }
     }
     group.finish();
 }
 
+fn bench_synthetic(c: &mut Criterion) {
+    require_weights();
+    bench_model(c, "ogsov", |rgb, width, height| {
+        mangacolor::detect_ogsov(rgb, width, height, 3)
+            .expect("ogsov")
+            .score as f64
+    });
+    bench_model(c, "ogsox", |rgb, width, height| {
+        mangacolor::detect_ogsox(rgb, width, height, 3)
+            .expect("ogsox")
+            .score as f64
+    });
+}
+
 fn configured_image_roots() -> Vec<PathBuf> {
-    std::env::var_os("OGSOV_BENCH_IMAGES")
+    std::env::var_os("MANGACOLOR_BENCH_IMAGES")
         .map(|paths| std::env::split_paths(&paths).collect())
         .unwrap_or_default()
 }
@@ -224,26 +249,41 @@ fn load_images() -> Vec<Canvas> {
     images
 }
 
-fn bench_images(c: &mut Criterion) {
-    let images = load_images();
-    if images.is_empty() {
-        eprintln!("No real images configured; set OGSOV_BENCH_IMAGES to files/directories");
-        return;
-    }
-
-    let model = model();
-    let mut group = c.benchmark_group("images/detect");
+fn bench_model_images<F>(c: &mut Criterion, model: &str, images: &[Canvas], detect: F)
+where
+    F: Fn(&[u8], usize, usize) -> f64,
+{
+    let mut group = c.benchmark_group(format!("images/{model}"));
     for image in images {
         group.throughput(Throughput::Elements((image.width * image.height) as u64));
         let id = BenchmarkId::new(
             image.name.clone(),
             format!("{}x{}", image.width, image.height),
         );
-        group.bench_with_input(id, &image, |b, image| {
-            b.iter(|| black_box(model.detect(black_box(&image.rgb), image.width, image.height)));
+        group.bench_with_input(id, image, |b, image| {
+            b.iter(|| black_box(detect(black_box(&image.rgb), image.width, image.height)));
         });
     }
     group.finish();
+}
+
+fn bench_images(c: &mut Criterion) {
+    let images = load_images();
+    if images.is_empty() {
+        eprintln!("No real images configured; set MANGACOLOR_BENCH_IMAGES to files/directories");
+        return;
+    }
+    require_weights();
+    bench_model_images(c, "ogsov", &images, |rgb, width, height| {
+        mangacolor::detect_ogsov(rgb, width, height, 3)
+            .expect("ogsov")
+            .score as f64
+    });
+    bench_model_images(c, "ogsox", &images, |rgb, width, height| {
+        mangacolor::detect_ogsox(rgb, width, height, 3)
+            .expect("ogsox")
+            .score as f64
+    });
 }
 
 criterion_group! {

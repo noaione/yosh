@@ -141,9 +141,11 @@ fn effective_decode_options(
     perf: config::PerfPref,
     on_battery: bool,
 ) -> yosh_engine::decode::DecodeOptions {
-    if color_detection == config::ColorDetectionPref::Ml
-        && ((perf == config::PerfPref::Auto && on_battery)
-            || effective_tier(perf, on_battery) == DeviceTier::Low)
+    if matches!(
+        color_detection,
+        config::ColorDetectionPref::Ml | config::ColorDetectionPref::Ogsox
+    ) && ((perf == config::PerfPref::Auto && on_battery)
+        || effective_tier(perf, on_battery) == DeviceTier::Low)
     {
         config::ColorDetectionPref::Traditional.decode_options()
     } else {
@@ -4117,6 +4119,17 @@ mod tests {
                 "{perf:?} on AC keeps ML enabled",
             );
         }
+        assert_eq!(
+            effective_decode_options(ColorDetectionPref::Ogsox, PerfPref::Low, false)
+                .color_detection,
+            ColorDetection::Traditional,
+            "OGSOX is throttled like OGSOV",
+        );
+        assert_eq!(
+            effective_decode_options(ColorDetectionPref::Ogsox, PerfPref::High, false)
+                .color_detection,
+            ColorDetection::Ogsox,
+        );
         assert_eq!(
             effective_decode_options(ColorDetectionPref::Off, PerfPref::Low, true).color_detection,
             ColorDetection::Off,

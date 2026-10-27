@@ -83,7 +83,8 @@ pub static FR: Strings = Strings {
     info_detection_ogsov: |state, confidence| {
         format!("OGSOV · {state} · confiance : {confidence} %")
     },
-    info_detection_unavailable: "OGSOV indisponible (poids manquants)",
+    info_detection_ogsox: |state, confidence| format!("OGSOX · {state} · confiance: {confidence}%"),
+    info_detection_unavailable: "ML indisponible (poids manquants)",
     info_detection_transparent: "non exécuté (image transparente)",
     color_state_color: "couleur",
     color_state_grayscale: "niveaux de gris",
@@ -219,7 +220,8 @@ pub static FR: Strings = Strings {
     color_page_detection: "Détection des pages couleur",
     color_detection_traditional: "Classique",
     color_detection_ml: "ML",
-    color_detection_weights_missing: "Les poids OGSOV ne sont pas inclus dans cette version",
+    color_detection_ogsox: "OGSOX",
+    color_detection_weights_missing: "Les poids ML ne sont pas inclus dans cette version",
     perf_auto_now: |tier, battery| {
         format!(
             "Auto — actuellement {tier} ({})",

@@ -81,7 +81,8 @@ pub static ZH_HANS: Strings = Strings {
     info_detection_source_gray: "源图为灰度",
     info_detection_traditional: |state| format!("传统 · {state}"),
     info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · 置信度: {confidence}%"),
-    info_detection_unavailable: "OGSOV 不可用（缺少权重）",
+    info_detection_ogsox: |state, confidence| format!("OGSOX · {state} · 置信度: {confidence}%"),
+    info_detection_unavailable: "ML 不可用（缺少权重）",
     info_detection_transparent: "未运行（透明图像）",
     color_state_color: "彩色",
     color_state_grayscale: "灰度",
@@ -193,7 +194,8 @@ pub static ZH_HANS: Strings = Strings {
     color_page_detection: "彩色页面检测",
     color_detection_traditional: "传统",
     color_detection_ml: "ML",
-    color_detection_weights_missing: "此版本未嵌入 OGSOV 权重",
+    color_detection_ogsox: "OGSOX",
+    color_detection_weights_missing: "此版本未嵌入 ML 权重",
     perf_auto_now: |tier, battery| {
         format!(
             "自动 — 当前为{tier}（{}）",

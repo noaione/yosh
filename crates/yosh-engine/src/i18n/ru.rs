@@ -84,7 +84,10 @@ pub static RU: Strings = Strings {
     info_detection_ogsov: |state, confidence| {
         format!("OGSOV · {state} · уверенность: {confidence}%")
     },
-    info_detection_unavailable: "OGSOV недоступен (нет весов)",
+    info_detection_ogsox: |state, confidence| {
+        format!("OGSOX · {state} · уверенность: {confidence}%")
+    },
+    info_detection_unavailable: "ML недоступен (нет весов)",
     info_detection_transparent: "не запускалось (прозрачное изображение)",
     color_state_color: "цвет",
     color_state_grayscale: "оттенки серого",
@@ -205,7 +208,8 @@ pub static RU: Strings = Strings {
     color_page_detection: "Обнаружение цветных страниц",
     color_detection_traditional: "Традиционный метод",
     color_detection_ml: "ML",
-    color_detection_weights_missing: "В этой сборке нет весов OGSOV",
+    color_detection_ogsox: "OGSOX",
+    color_detection_weights_missing: "В этой сборке нет весов ML",
     perf_auto_now: |tier, battery| {
         format!(
             "Авто — сейчас: {tier} ({})",

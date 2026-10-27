@@ -22,18 +22,26 @@ pub struct Update {
     pub download_url: String, // browser_download_url of ASSET
 }
 
+/// A one-shot agent with a total-operation timeout (ureq 3 configures timeouts
+/// on the agent, not on the request builder).
+fn agent(timeout: Duration) -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(timeout))
+        .build()
+        .into()
+}
+
 /// Query the latest release; `Some` if it is newer than this build. Blocking —
 /// call on a background thread. `None` on any error or when already current.
 pub fn check() -> Option<Update> {
     let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    let body = ureq::get(&url)
-        .set("User-Agent", UA)
-        .set("Accept", "application/vnd.github+json")
-        .timeout(Duration::from_secs(10))
+    let mut response = agent(Duration::from_secs(10))
+        .get(&url)
+        .header("User-Agent", UA)
+        .header("Accept", "application/vnd.github+json")
         .call()
-        .ok()?
-        .into_string()
         .ok()?;
+    let body = response.body_mut().read_to_string().ok()?;
     let json: serde_json::Value = serde_json::from_str(&body).ok()?;
     let latest = json["tag_name"]
         .as_str()?
@@ -57,12 +65,12 @@ pub fn check() -> Option<Update> {
 /// Download the new binary and replace the running exe in place. Blocking — call
 /// on a background thread. On success the caller relaunches the (new) exe.
 pub fn apply(update: &Update) -> Result<(), String> {
-    let mut reader = ureq::get(&update.download_url)
-        .set("User-Agent", UA)
-        .timeout(Duration::from_secs(300))
+    let mut response = agent(Duration::from_secs(300))
+        .get(&update.download_url)
+        .header("User-Agent", UA)
         .call()
-        .map_err(|e| e.to_string())?
-        .into_reader();
+        .map_err(|e| e.to_string())?;
+    let mut reader = response.body_mut().as_reader();
     let tmp = std::env::temp_dir().join("yosh-update.bin");
     {
         let mut f = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;

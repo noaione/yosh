@@ -202,7 +202,7 @@ impl ZipSource {
             .filter(|&i| {
                 decoded[i]
                     .as_ref()
-                    .map_or(true, |name| !name.ends_with('/') && is_image_name(name))
+                    .is_none_or(|name| !name.ends_with('/') && is_image_name(name))
             })
             .collect();
 

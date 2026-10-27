@@ -1,0 +1,26 @@
+[package]
+name = "mangacolor"
+version = "0.2.0"
+edition = "2024"
+description = "CPU manga colour-page detection: OGSOV (colourfulness histogram + five MLPs) and OGSOX (512² tiling + five attention heads)"
+license = "MIT"
+
+# No runtime dependencies: the models are plain float32 parameters decoded from
+# generated assets, and every kernel is hand-written (SIMD intrinsics included).
+[dependencies]
+
+[build-dependencies]
+# The build script converts the checked-out weights into the embedded model
+# assets (`$OUT_DIR/ogsov.bin`, `$OUT_DIR/ogsox.bin`). Missing weights are a
+# supported state: the crate builds with `*_EMBEDDED = false` and the caller
+# decides what to do, so a plain `cargo build` never needs the weights.
+npyz = "0.9.1"
+zip = { version = "9", default-features = false, features = ["deflate", "deflate64"] }
+
+[dev-dependencies]
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+image = { version = "0.25", default-features = false, features = ["bmp", "gif", "jpeg", "png", "qoi", "tiff"] }
+
+[[bench]]
+name = "detect"
+harness = false

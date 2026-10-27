@@ -81,7 +81,8 @@ pub static KO: Strings = Strings {
     info_detection_source_gray: "원본 그레이스케일",
     info_detection_traditional: |state| format!("기존 방식 · {state}"),
     info_detection_ogsov: |state, confidence| format!("OGSOV · {state} · 신뢰도: {confidence}%"),
-    info_detection_unavailable: "OGSOV 사용할 수 없음 (가중치 파일 없음)",
+    info_detection_ogsox: |state, confidence| format!("OGSOX · {state} · 신뢰도: {confidence}%"),
+    info_detection_unavailable: "ML 사용할 수 없음 (가중치 파일 없음)",
     info_detection_transparent: "실행 안 됨 (투명 이미지)",
     color_state_color: "컬러",
     color_state_grayscale: "그레이스케일",
@@ -193,7 +194,8 @@ pub static KO: Strings = Strings {
     color_page_detection: "컬러 페이지 감지",
     color_detection_traditional: "기존 방식",
     color_detection_ml: "ML",
-    color_detection_weights_missing: "이 빌드에는 OGSOV 가중치가 포함되어 있지 않습니다",
+    color_detection_ogsox: "OGSOX",
+    color_detection_weights_missing: "이 빌드에는 ML 가중치가 포함되어 있지 않습니다",
     perf_auto_now: |tier, battery| {
         format!(
             "자동 — 현재 {tier} ({})",

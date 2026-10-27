@@ -1293,9 +1293,20 @@ fn settings_window(ctx: &egui::Context, st: &mut UiState) {
                         t.color_detection_traditional,
                     ),
                     (crate::config::ColorDetectionPref::Ml, t.color_detection_ml),
+                    (
+                        crate::config::ColorDetectionPref::Ogsox,
+                        t.color_detection_ogsox,
+                    ),
                 ] {
-                    let enabled = mode != crate::config::ColorDetectionPref::Ml
-                        || yosh_engine::decode::ml_color_detection_available();
+                    let enabled = match mode {
+                        crate::config::ColorDetectionPref::Ml => {
+                            yosh_engine::decode::ml_color_detection_available()
+                        }
+                        crate::config::ColorDetectionPref::Ogsox => {
+                            yosh_engine::decode::ogsox_color_detection_available()
+                        }
+                        _ => true,
+                    };
                     let response = ui.add_enabled(
                         enabled,
                         egui::Button::selectable(st.color_detection == mode, text),

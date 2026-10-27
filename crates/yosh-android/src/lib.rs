@@ -828,6 +828,7 @@ enum ColorDetectionPref {
     Off,
     Traditional,
     Ml,
+    Ogsox,
 }
 
 impl ColorDetectionPref {
@@ -836,6 +837,7 @@ impl ColorDetectionPref {
             Self::Off => "off",
             Self::Traditional => "traditional",
             Self::Ml => "ml",
+            Self::Ogsox => "ogsox",
         }
     }
 
@@ -843,6 +845,7 @@ impl ColorDetectionPref {
         match tok {
             Some(&"off") => Self::Off,
             Some(&"ml") => Self::Ml,
+            Some(&"ogsox") => Self::Ogsox,
             _ => Self::Traditional,
         }
     }
@@ -854,6 +857,7 @@ impl ColorDetectionPref {
                 Self::Off => ColorDetection::Off,
                 Self::Traditional => ColorDetection::Traditional,
                 Self::Ml => ColorDetection::Ml,
+                Self::Ogsox => ColorDetection::Ogsox,
             },
         }
     }
@@ -861,7 +865,7 @@ impl ColorDetectionPref {
     /// Low-tier devices skip ML's extra CPU work but retain the user's ML choice
     /// for when a higher tier becomes active.
     fn decode_options_for_tier(self, tier: DeviceTier) -> yosh_engine::decode::DecodeOptions {
-        if self == Self::Ml && tier == DeviceTier::Low {
+        if matches!(self, Self::Ml | Self::Ogsox) && tier == DeviceTier::Low {
             Self::Traditional.decode_options()
         } else {
             self.decode_options()
@@ -3724,9 +3728,17 @@ fn options_popup(
                                     t.color_detection_traditional,
                                 ),
                                 (ColorDetectionPref::Ml, t.color_detection_ml),
+                                (ColorDetectionPref::Ogsox, t.color_detection_ogsox),
                             ] {
-                                let enabled = mode != ColorDetectionPref::Ml
-                                    || yosh_engine::decode::ml_color_detection_available();
+                                let enabled = match mode {
+                                    ColorDetectionPref::Ml => {
+                                        yosh_engine::decode::ml_color_detection_available()
+                                    }
+                                    ColorDetectionPref::Ogsox => {
+                                        yosh_engine::decode::ogsox_color_detection_available()
+                                    }
+                                    _ => true,
+                                };
                                 let response = ui.add_enabled(
                                     enabled,
                                     egui::Button::selectable(

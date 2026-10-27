@@ -158,13 +158,38 @@ jobs:
           meson setup build --prefix=C:\build -Ddefault_library=static -Denable_tools=false -Denable_examples=false -Db_vscrt=mt --buildtype=release
           ninja -C build install
 
-      - name: Fetch OGSOV weights
+      - name: Fetch model weights
         shell: pwsh
         env:
-          OGSOV_WEIGHTS_URL: ${{ secrets.OGSOV_WEIGHTS_URL }}
+          # One zip of `ogsov.npz`, `ogsox_classifier_optimized.onnx` and
+          # `ogsox_lookup_table.npz` -- the same archive the vs-mangacolor CI
+          # publishes. `OGSOV_WEIGHTS_URL` is accepted as a fallback so an
+          # existing secret keeps working; its value must be the zip too.
+          MANGACOLOR_WEIGHTS_URL: ${{ secrets.MANGACOLOR_WEIGHTS_URL }}
         run: |
-          if ($env:OGSOV_WEIGHTS_URL) {
-            Invoke-WebRequest -Uri $env:OGSOV_WEIGHTS_URL -OutFile crates/ogsov/ogsov_weights.npz
+          if (-not $env:MANGACOLOR_WEIGHTS_URL) {
+            Write-Host "::warning::no weights URL is set; building without the embedded ML models"
+            exit 0
+          }
+          $archive = Join-Path $env:RUNNER_TEMP "mangacolor-weights.zip"
+          Invoke-WebRequest -Uri $env:MANGACOLOR_WEIGHTS_URL -OutFile $archive
+          $expanded = Join-Path $env:RUNNER_TEMP "mangacolor-weights"
+          if (Test-Path $expanded) { Remove-Item -Recurse -Force $expanded }
+          Expand-Archive -Path $archive -DestinationPath $expanded
+          $target = "crates/mangacolor"
+          New-Item -ItemType Directory -Force -Path $target | Out-Null
+          # The archive may nest the files; collect them by basename and store
+          # `ogsov.npz` under the name the build script looks for.
+          $wanted = [ordered]@{
+            "ogsov.npz" = "ogsov_weights.npz"
+            "ogsox_classifier_optimized.onnx" = "ogsox_classifier_optimized.onnx"
+            "ogsox_lookup_table.npz" = "ogsox_lookup_table.npz"
+          }
+          foreach ($source in $wanted.Keys) {
+            $file = Get-ChildItem -Path $expanded -Recurse -File -Filter $source | Select-Object -First 1
+            if (-not $file) { throw "$source is not in the weights archive" }
+            Copy-Item -Path $file.FullName -Destination (Join-Path $target $wanted[$source]) -Force
+            Write-Host "wrote $target/$($wanted[$source])"
           }
 
       - name: Build
@@ -283,13 +308,42 @@ jobs:
           echo "VERSION_CODE=$vc"  >> "$GITHUB_ENV"
           echo "APK version $vn (code $vc)"
 
-      - name: Fetch OGSOV weights
+      - name: Fetch model weights
         env:
-          OGSOV_WEIGHTS_URL: ${{ secrets.OGSOV_WEIGHTS_URL }}
+          # One zip of `ogsov.npz`, `ogsox_classifier_optimized.onnx` and
+          # `ogsox_lookup_table.npz` -- the same archive the vs-mangacolor CI
+          # publishes. `OGSOV_WEIGHTS_URL` is accepted as a fallback so an
+          # existing secret keeps working; its value must be the zip too.
+          MANGACOLOR_WEIGHTS_URL: ${{ secrets.MANGACOLOR_WEIGHTS_URL || secrets.OGSOV_WEIGHTS_URL }}
         run: |
-          if [ -n "$OGSOV_WEIGHTS_URL" ]; then
-            curl -fSL "$OGSOV_WEIGHTS_URL" -o crates/ogsov/ogsov_weights.npz
+          set -euo pipefail
+          if [ -z "$MANGACOLOR_WEIGHTS_URL" ]; then
+            echo "::warning::no weights URL is set; building without the embedded ML models"
+            exit 0
           fi
+          archive="$RUNNER_TEMP/mangacolor-weights.zip"
+          curl --fail --location --silent --show-error "$MANGACOLOR_WEIGHTS_URL" --output "$archive"
+          python3 - "$archive" <<'PY'
+          import pathlib, sys, zipfile
+
+          # The archive may nest the three files; collect them by basename and
+          # store `ogsov.npz` under the name the build script looks for.
+          wanted = {
+              "ogsov.npz": "ogsov_weights.npz",
+              "ogsox_classifier_optimized.onnx": "ogsox_classifier_optimized.onnx",
+              "ogsox_lookup_table.npz": "ogsox_lookup_table.npz",
+          }
+          archive = pathlib.Path(sys.argv[1])
+          target = pathlib.Path("crates/mangacolor")
+          target.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(archive) as bundle:
+              entries = {pathlib.Path(name).name: name for name in bundle.namelist()}
+              for source, renamed in wanted.items():
+                  if source not in entries:
+                      sys.exit(f"{source} is not in the weights archive")
+                  (target / renamed).write_bytes(bundle.read(entries[source]))
+                  print(f"wrote {target / renamed}")
+          PY
 
       - name: Decode signing keystore
         if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}

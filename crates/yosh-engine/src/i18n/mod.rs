@@ -307,6 +307,7 @@ pub struct Strings {
     pub info_detection_source_gray: &'static str,
     pub info_detection_traditional: fn(&str) -> String,
     pub info_detection_ogsov: fn(&str, u8) -> String,
+    pub info_detection_ogsox: fn(&str, u8) -> String,
     pub info_detection_unavailable: &'static str,
     pub info_detection_transparent: &'static str,
     pub color_state_color: &'static str,
@@ -362,6 +363,7 @@ pub struct Strings {
     pub color_page_detection: &'static str,
     pub color_detection_traditional: &'static str,
     pub color_detection_ml: &'static str,
+    pub color_detection_ogsox: &'static str,
     pub color_detection_weights_missing: &'static str,
     /// What `Auto` resolves to right now: tier name, and whether on battery.
     pub perf_auto_now: fn(&str, bool) -> String,
