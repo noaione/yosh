@@ -179,26 +179,36 @@ impl ZipSource {
     /// only a genuinely legacy-encoded archive pays a local-header seek per entry
     /// (~1.5 ms for 500 entries).
     fn list_central(zip: &mut ZipArchive<Reader>) -> (Vec<String>, Vec<usize>) {
-        let decoded: Vec<String> = zip.file_names().map(str::to_string).collect();
+        // Keep one slot per archive entry even when zip cannot decode a name; the
+        // positions here are the indices used by `by_index` and `index_for_name`.
+        let decoded: Vec<Option<String>> = zip
+            .file_names()
+            .map(|name| name.map(|name| name.into_owned()).ok())
+            .collect();
         // Compare against `Some(i)`, not just `is_some()`: a pathological archive holding
         // both the raw and the transliterated spelling of one name would otherwise let an
         // entry validate against its neighbour.
         let exact: Vec<bool> = decoded
             .iter()
             .enumerate()
-            .map(|(i, n)| zip.index_for_name(n) == Some(i))
+            .map(|(i, n)| n.as_ref().is_some_and(|n| zip.index_for_name(n) == Some(i)))
             .collect();
         // Image filtering can run on the transliterated name: CP437 maps ASCII to itself,
         // and no legacy trail byte is `.` (Shift-JIS trail bytes start at 0x40), so the
         // extension survives transliteration intact. Filtering first also keeps the raw
-        // re-read below down to the pages we actually intend to show.
+        // re-read below down to the pages we actually intend to show. Names zip couldn't
+        // decode are kept as candidates until their raw bytes have been decoded below.
         let keep: Vec<usize> = (0..decoded.len())
-            .filter(|&i| !decoded[i].ends_with('/') && is_image_name(&decoded[i]))
+            .filter(|&i| {
+                decoded[i]
+                    .as_ref()
+                    .map_or(true, |name| !name.ends_with('/') && is_image_name(name))
+            })
             .collect();
 
-        // Only names that failed the round-trip need their raw bytes re-read. A raw read
-        // that fails just leaves that entry on the crate's own decoding — one bad entry
-        // shouldn't cost us the rest of the archive.
+        // Only names that failed the round-trip need their raw bytes re-read. If a raw
+        // read fails, keep zip's decoded name when available; one bad entry shouldn't
+        // cost us the rest of the archive.
         let (idxs, raws): (Vec<usize>, Vec<Vec<u8>>) = keep
             .iter()
             .copied()
@@ -213,7 +223,10 @@ impl ZipSource {
 
         let mut entries: Vec<(String, usize)> = keep
             .into_iter()
-            .map(|i| (legacy[i].take().unwrap_or_else(|| decoded[i].clone()), i))
+            .filter_map(|i| {
+                let name = legacy[i].take().or_else(|| decoded[i].clone())?;
+                (!name.ends_with('/') && is_image_name(&name)).then_some((name, i))
+            })
             .collect();
         entries.sort_by(|a, b| natord::compare(&a.0, &b.0));
         entries.into_iter().unzip()
@@ -231,14 +244,18 @@ impl ZipSource {
         while let Ok(off) = reader.stream_position() {
             match zip::read::read_zipfile_from_stream(&mut reader) {
                 Ok(Some(mut file)) => {
-                    let name = file.name().to_string();
-                    let keep = !name.ends_with('/') && is_image_name(&name);
+                    // A bad filename should not prevent the stream from reaching later
+                    // local headers. It cannot be listed safely, but its data still needs
+                    // draining before the next header can be read.
+                    let name = file.name().ok().map(|name| name.into_owned());
                     // Drain past the data to reach the next header; a truncated final
                     // entry errors here → stop without recording the incomplete page.
                     if io::copy(&mut file, &mut io::sink()).is_err() {
                         break;
                     }
-                    if keep {
+                    if let Some(name) =
+                        name.filter(|name| !name.ends_with('/') && is_image_name(name))
+                    {
                         entries.push((name, off));
                     }
                 }

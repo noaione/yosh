@@ -40,7 +40,7 @@ image = { version = "0.25", default-features = false, features = [
     "tga",
     "tiff"
 ] }
-zip = "8"
+zip = "9"
 
 [dependencies]
 # The decode core: `cover::cover_bytes` extracts the selected cover entry, and

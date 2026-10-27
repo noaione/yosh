@@ -53,14 +53,14 @@ fast_image_resize = "6"
 qcms = "0.3"
 ogsov = { path = "../ogsov" }
 # ICO container parsing (multi-image .ico → layered pages) and re-encoding.
-ico = "0.5"
-wpd = { git = "https://github.com/halidecx/wpd", rev = "45d5955260f6c44a1b6bea6954a4a34e818f3f8a", default-features = false, features = ["threads"] }
+ico = "0.6"
+wpd = { git = "https://github.com/halidecx/wpd", rev = "6fa9de20df3eacc5259751573c220ea6a7b03e5b", default-features = false, features = ["threads"] }
 natord = "1"
 # Archive page sources: zip/cbz (parallel reads), rar/cbr + 7z/cb7 (sequential —
 # a reader thread decompresses into an in-memory map served to readers).
-zip = "8"
+zip = "9"
 unrar = { version = "0.5", optional = true }
-sevenz-rust2 = "0.21"
+sevenz-rust2 = "0.24.1"
 # Legacy archive-entry-name decoding (both pure Rust, no C toolchain). Zip stores
 # names as raw bytes and only flags UTF-8 via general-purpose bit 11; Japanese and
 # Chinese CBZs are routinely written with that flag clear and Shift-JIS/GBK bytes,
